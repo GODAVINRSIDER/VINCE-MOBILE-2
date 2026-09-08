@@ -42,8 +42,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         sending = true
 
         scope.launch {
-            val apiKey = ApiKeyStore.getKey(context)
-            val reply = GeminiClient.sendMessage(apiKey, text)
+            val reply = BrainRouter.sendMessage(context, text)
             val replyMsg = ChatMessage(fromUser = false, text = reply)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)

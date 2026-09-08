@@ -62,7 +62,7 @@ fun RootScreen() {
 @Composable
 fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val keyIsSet = remember { ApiKeyStore.hasKey(context) }
+    val keyIsSet = remember { ApiKeyStore.hasAnyKey(context) }
 
     Column(
         modifier = Modifier
@@ -79,14 +79,14 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 3 - chat threads + memory",
+            text = "STAGE 4 - multi-API fallback",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )
         Spacer(modifier = Modifier.height(32.dp))
 
         Text(
-            text = if (keyIsSet) "Gemini API key: saved" else "Gemini API key: not set yet",
+            text = if (keyIsSet) "At least one API key saved" else "No API keys set yet",
             color = if (keyIsSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
         )
         Spacer(modifier = Modifier.height(16.dp))
@@ -104,7 +104,10 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var keyText by remember { mutableStateOf(ApiKeyStore.getKey(context)) }
+
+    var geminiText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.GEMINI)) }
+    var groqText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.GROQ)) }
+    var openRouterText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.OPENROUTER)) }
     var saved by remember { mutableStateOf(false) }
 
     Column(
@@ -118,24 +121,49 @@ fun SettingsScreen(onBack: () -> Unit) {
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Chat tries these in order - Gemini, then Groq, then OpenRouter - " +
+                "falling through automatically if one is unavailable or over quota. " +
+                "Leave any of them blank to skip that provider.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(modifier = Modifier.height(20.dp))
 
         Text("Gemini API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         OutlinedTextField(
-            value = keyText,
-            onValueChange = {
-                keyText = it
-                saved = false
-            },
+            value = geminiText,
+            onValueChange = { geminiText = it; saved = false },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("Groq API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        OutlinedTextField(
+            value = groqText,
+            onValueChange = { groqText = it; saved = false },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("OpenRouter API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        OutlinedTextField(
+            value = openRouterText,
+            onValueChange = { openRouterText = it; saved = false },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         Row {
             Button(onClick = {
-                ApiKeyStore.saveKey(context, keyText)
+                ApiKeyStore.saveKey(context, Provider.GEMINI, geminiText)
+                ApiKeyStore.saveKey(context, Provider.GROQ, groqText)
+                ApiKeyStore.saveKey(context, Provider.OPENROUTER, openRouterText)
                 saved = true
             }) {
                 Text("Save")

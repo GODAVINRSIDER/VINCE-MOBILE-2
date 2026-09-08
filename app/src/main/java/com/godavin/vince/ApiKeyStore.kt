@@ -5,14 +5,20 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
+enum class Provider(val displayName: String, val prefKey: String) {
+    GEMINI("Gemini", "gemini_api_key"),
+    GROQ("Groq", "groq_api_key"),
+    OPENROUTER("OpenRouter", "openrouter_api_key"),
+}
+
 /**
- * Stores VINCE Mobile's OWN Gemini API key, encrypted at rest on the device.
- * Deliberately separate from PC-VINCE's config.py key - this app never talks
- * to the PC at all (Stage 1 of the standalone-phone-VINCE pivot).
+ * Stores VINCE Mobile's OWN API keys, encrypted at rest on the device -
+ * one slot per provider in the fallback rotation (see BrainRouter.kt).
+ * Deliberately separate from PC-VINCE's keys in config.py - this app
+ * never talks to the PC at all.
  */
 object ApiKeyStore {
     private const val PREFS_NAME = "vince_secure_prefs"
-    private const val KEY_GEMINI_API_KEY = "gemini_api_key"
 
     private fun prefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
@@ -28,13 +34,19 @@ object ApiKeyStore {
         )
     }
 
-    fun getKey(context: Context): String {
-        return prefs(context).getString(KEY_GEMINI_API_KEY, "") ?: ""
+    fun getKey(context: Context, provider: Provider): String {
+        return prefs(context).getString(provider.prefKey, "") ?: ""
     }
 
-    fun saveKey(context: Context, key: String) {
-        prefs(context).edit().putString(KEY_GEMINI_API_KEY, key.trim()).apply()
+    fun saveKey(context: Context, provider: Provider, key: String) {
+        prefs(context).edit().putString(provider.prefKey, key.trim()).apply()
     }
 
-    fun hasKey(context: Context): Boolean = getKey(context).isNotBlank()
+    fun hasKey(context: Context, provider: Provider): Boolean =
+        getKey(context, provider).isNotBlank()
+
+    /** True if at least one provider has a key saved - used by the home
+     * screen's status line, which shouldn't only check Gemini anymore. */
+    fun hasAnyKey(context: Context): Boolean =
+        Provider.values().any { hasKey(context, it) }
 }

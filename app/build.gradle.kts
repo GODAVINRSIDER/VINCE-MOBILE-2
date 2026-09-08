@@ -48,4 +48,8 @@ dependencies {
 
     // Secure local storage for the Gemini API key (Stage 1)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Stage 2 - talks directly to the Gemini API, no PC involved
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

@@ -34,19 +34,24 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class Screen { HOME, SETTINGS, CHAT }
+
 @Composable
 fun RootScreen() {
-    var showSettings by remember { mutableStateOf(false) }
+    var screen by remember { mutableStateOf(Screen.HOME) }
 
-    if (showSettings) {
-        SettingsScreen(onBack = { showSettings = false })
-    } else {
-        HomeScreen(onOpenSettings = { showSettings = true })
+    when (screen) {
+        Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.HOME })
+        Screen.CHAT -> ChatScreen(onBack = { screen = Screen.HOME })
+        Screen.HOME -> HomeScreen(
+            onOpenSettings = { screen = Screen.SETTINGS },
+            onOpenChat = { screen = Screen.CHAT }
+        )
     }
 }
 
 @Composable
-fun HomeScreen(onOpenSettings: () -> Unit) {
+fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val keyIsSet = remember { ApiKeyStore.hasKey(context) }
 
@@ -65,7 +70,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 1 - fresh build check",
+            text = "STAGE 2 - standalone chat",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )
@@ -77,7 +82,11 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onOpenSettings) {
+        Button(onClick = onOpenChat) {
+            Text("Chat")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(onClick = onOpenSettings) {
             Text("Settings")
         }
     }

@@ -15,8 +15,8 @@ private val VinceDarkColors = darkColorScheme(
     primary = VinceTeal,
     secondary = ClaraPink,
     tertiary = DavinaPurple,
-    background = Color(0xFF05070C),
-    surface = Color(0xFF0A1420),
+    background = Color(0xFF000000),
+    surface = Color(0xFF000000),
 )
 
 @Composable

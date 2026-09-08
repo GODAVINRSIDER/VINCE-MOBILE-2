@@ -1,6 +1,7 @@
 package com.godavin.vince
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -25,58 +26,82 @@ import java.util.concurrent.TimeUnit
 object GeminiClient {
     private const val MODEL = "gemini-3.6-flash"
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+    private const val MAX_ATTEMPTS = 2
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
         .build()
 
     /** Returns the reply text on success, or a user-facing error string
      * prefixed so the chat screen can show it inline like any other
-     * message rather than needing a separate error UI. */
+     * message rather than needing a separate error UI. Retries once on a
+     * network-level failure (timeout, dropped connection) before giving
+     * up - a single flaky moment on mobile data shouldn't fail the whole
+     * message when a second try would likely succeed. */
     suspend fun sendMessage(apiKey: String, userMessage: String): String {
         if (apiKey.isBlank()) {
             return "No Gemini API key saved yet - add one in Settings first."
         }
 
-        return withContext(Dispatchers.IO) {
-            try {
-                val requestJson = JSONObject().apply {
-                    put("contents", JSONArray().put(
-                        JSONObject().apply {
-                            put("role", "user")
-                            put("parts", JSONArray().put(
-                                JSONObject().put("text", userMessage)
-                            ))
-                        }
-                    ))
-                }
+        var lastNetworkError: String? = null
 
-                val body = requestJson.toString()
-                    .toRequestBody("application/json".toMediaType())
-
-                val request = Request.Builder()
-                    .url("$BASE_URL/$MODEL:generateContent?key=$apiKey")
-                    .post(body)
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string().orEmpty()
-
-                    if (!response.isSuccessful) {
-                        return@withContext "Gemini returned an error (${response.code}): " +
-                            responseBody.take(200)
+        for (attempt in 1..MAX_ATTEMPTS) {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val requestJson = JSONObject().apply {
+                        put("contents", JSONArray().put(
+                            JSONObject().apply {
+                                put("role", "user")
+                                put("parts", JSONArray().put(
+                                    JSONObject().put("text", userMessage)
+                                ))
+                            }
+                        ))
                     }
 
-                    parseReply(responseBody)
-                        ?: "Gemini responded but I couldn't find any text in the reply."
+                    val body = requestJson.toString()
+                        .toRequestBody("application/json".toMediaType())
+
+                    val request = Request.Builder()
+                        .url("$BASE_URL/$MODEL:generateContent?key=$apiKey")
+                        .post(body)
+                        .build()
+
+                    client.newCall(request).execute().use { response ->
+                        val responseBody = response.body?.string().orEmpty()
+
+                        if (!response.isSuccessful) {
+                            return@withContext Result.success(
+                                "Gemini returned an error (${response.code}): " +
+                                    responseBody.take(200)
+                            )
+                        }
+
+                        Result.success(
+                            parseReply(responseBody)
+                                ?: "Gemini responded but I couldn't find any text in the reply."
+                        )
+                    }
+                } catch (e: IOException) {
+                    Result.failure<String>(e)
+                } catch (e: Exception) {
+                    return@withContext Result.success("Something went wrong talking to Gemini. (${e.message})")
                 }
-            } catch (e: IOException) {
-                "Couldn't reach Gemini - check your internet connection. (${e.message})"
-            } catch (e: Exception) {
-                "Something went wrong talking to Gemini. (${e.message})"
+            }
+
+            if (result.isSuccess) {
+                return result.getOrThrow()
+            }
+
+            lastNetworkError = result.exceptionOrNull()?.message
+            if (attempt < MAX_ATTEMPTS) {
+                delay(1500)
             }
         }
+
+        return "Couldn't reach Gemini after $MAX_ATTEMPTS tries - check your internet connection. " +
+            "(${lastNetworkError ?: "timeout"})"
     }
 
     private fun parseReply(responseBody: String): String? {

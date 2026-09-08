@@ -13,30 +13,40 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-data class ChatMessage(val fromUser: Boolean, val text: String)
-
 @Composable
-fun ChatScreen(onBack: () -> Unit) {
+fun ChatScreen(threadId: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
-    val messages = remember { mutableStateListOf<ChatMessage>() }
+
+    // Loads this specific thread's saved history on first open - keyed on
+    // threadId so switching threads via the sidebar re-loads correctly
+    // instead of reusing whatever was in state from the previous thread.
+    val messages = remember(threadId) {
+        mutableStateListOf<ChatMessage>().apply {
+            ConversationStore.getThread(context, threadId)?.messages?.let { addAll(it) }
+        }
+    }
 
     fun send() {
         val text = input.trim()
         if (text.isEmpty() || sending) return
 
-        messages.add(ChatMessage(fromUser = true, text = text))
+        val userMsg = ChatMessage(fromUser = true, text = text)
+        messages.add(userMsg)
+        ConversationStore.addMessage(context, threadId, userMsg)
         input = ""
         sending = true
 
         scope.launch {
             val apiKey = ApiKeyStore.getKey(context)
             val reply = GeminiClient.sendMessage(apiKey, text)
-            messages.add(ChatMessage(fromUser = false, text = reply))
+            val replyMsg = ChatMessage(fromUser = false, text = reply)
+            messages.add(replyMsg)
+            ConversationStore.addMessage(context, threadId, replyMsg)
             sending = false
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
@@ -58,7 +68,7 @@ fun ChatScreen(onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary
             )
             TextButton(onClick = onBack) {
-                Text("Back")
+                Text("Chats")
             }
         }
 

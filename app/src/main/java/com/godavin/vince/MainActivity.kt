@@ -34,18 +34,27 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { HOME, SETTINGS, CHAT }
+private sealed class Screen {
+    object Home : Screen()
+    object Settings : Screen()
+    object ChatList : Screen()
+    data class Chat(val threadId: String) : Screen()
+}
 
 @Composable
 fun RootScreen() {
-    var screen by remember { mutableStateOf(Screen.HOME) }
+    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
 
-    when (screen) {
-        Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.HOME })
-        Screen.CHAT -> ChatScreen(onBack = { screen = Screen.HOME })
-        Screen.HOME -> HomeScreen(
-            onOpenSettings = { screen = Screen.SETTINGS },
-            onOpenChat = { screen = Screen.CHAT }
+    when (val s = screen) {
+        is Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Home })
+        is Screen.ChatList -> ChatListScreen(
+            onOpenThread = { id -> screen = Screen.Chat(id) },
+            onBack = { screen = Screen.Home }
+        )
+        is Screen.Chat -> ChatScreen(threadId = s.threadId, onBack = { screen = Screen.ChatList })
+        Screen.Home -> HomeScreen(
+            onOpenSettings = { screen = Screen.Settings },
+            onOpenChat = { screen = Screen.ChatList }
         )
     }
 }
@@ -70,7 +79,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 2 - standalone chat",
+            text = "STAGE 3 - chat threads + memory",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )

@@ -32,7 +32,7 @@ object BrainRouter {
             val result = OpenAiCompatibleClient.sendMessage(
                 baseUrl = "https://api.groq.com/openai/v1/chat/completions",
                 apiKey = groqKey,
-                model = "llama-3.3-70b-versatile",
+                model = "openai/gpt-oss-120b",
                 userMessage = userMessage,
                 providerLabel = "Groq"
             )
@@ -45,7 +45,12 @@ object BrainRouter {
             val result = OpenAiCompatibleClient.sendMessage(
                 baseUrl = "https://openrouter.ai/api/v1/chat/completions",
                 apiKey = openRouterKey,
-                model = "deepseek/deepseek-chat:free",
+                // "openrouter/free" is OpenRouter's own router model - it always
+                // resolves to whichever specific free model is currently available
+                // on their end, rather than us hardcoding one exact free model
+                // name that goes stale whenever THAT model gets rotated out
+                // (which is exactly what broke here the first time).
+                model = "openrouter/free",
                 userMessage = userMessage,
                 providerLabel = "OpenRouter"
             )

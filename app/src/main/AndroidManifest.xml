@@ -21,5 +21,18 @@
             </intent-filter>
         </activity>
 
+        <!-- Stage 8 - lets the system Camera app write a full-resolution
+             photo somewhere VINCE can read it back, without VINCE needing
+             its own camera permission (the Camera app handles that). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.godavin.vince.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 </manifest>

@@ -3,6 +3,9 @@ package com.godavin.vince
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,7 +21,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.io.File
 
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
@@ -114,6 +120,76 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
+    // Stage 8 - camera vision. Uses the system Camera app via an implicit
+    // intent (ACTION_IMAGE_CAPTURE through the TakePicture contract) so
+    // VINCE never needs its own CAMERA permission - the Camera app
+    // handles that itself. A FileProvider hands it a place to write the
+    // full-resolution photo that VINCE can then read back.
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun sendImage(uri: Uri, question: String) {
+        if (sending) return
+
+        val userMsg = ChatMessage(fromUser = true, text = "[Photo] $question")
+        messages.add(userMsg)
+        ConversationStore.addMessage(context, threadId, userMsg)
+        input = ""
+        sending = true
+
+        scope.launch {
+            val reply = try {
+                val bitmap = context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+                if (bitmap == null) {
+                    "Couldn't read the captured photo."
+                } else {
+                    val baos = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+                    val apiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+                    val result = GeminiVision.describeImage(apiKey, baos.toByteArray(), question)
+                    result.fold(
+                        onSuccess = { it },
+                        onFailure = { e -> "Couldn't analyze the photo. (${e.message})" }
+                    )
+                }
+            } catch (e: Exception) {
+                "Couldn't process the photo. (${e.message})"
+            }
+
+            val replyMsg = ChatMessage(fromUser = false, text = reply)
+            messages.add(replyMsg)
+            ConversationStore.addMessage(context, threadId, replyMsg)
+            sending = false
+            if (speakReplies) {
+                VoiceOutput.speak(reply)
+            }
+            if (messages.isNotEmpty()) {
+                listState.animateScrollToItem(messages.size - 1)
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingPhotoUri
+        if (success && uri != null) {
+            val question = input.trim().ifBlank {
+                "Describe what's in this image, including any visible text, numbers, or chart data."
+            }
+            sendImage(uri, question)
+        }
+    }
+
+    fun onCameraTapped() {
+        val dir = File(context.cacheDir, "camera_captures").apply { mkdirs() }
+        val file = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(context, "com.godavin.vince.fileprovider", file)
+        pendingPhotoUri = uri
+        cameraLauncher.launch(uri)
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -185,6 +261,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedButton(onClick = { onMicTapped() }, enabled = !sending) {
                 Text("Mic")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(onClick = { onCameraTapped() }, enabled = !sending) {
+                Text("Cam")
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = { send() }, enabled = !sending) {

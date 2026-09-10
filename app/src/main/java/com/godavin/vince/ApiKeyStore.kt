@@ -9,6 +9,7 @@ enum class Provider(val displayName: String, val prefKey: String) {
     GEMINI("Gemini", "gemini_api_key"),
     GROQ("Groq", "groq_api_key"),
     OPENROUTER("OpenRouter", "openrouter_api_key"),
+    FINNHUB("Finnhub", "finnhub_api_key"),
 }
 
 /**
@@ -45,8 +46,10 @@ object ApiKeyStore {
     fun hasKey(context: Context, provider: Provider): Boolean =
         getKey(context, provider).isNotBlank()
 
-    /** True if at least one provider has a key saved - used by the home
-     * screen's status line, which shouldn't only check Gemini anymore. */
+    /** True if at least one CHAT provider has a key saved - used by the
+     * home screen's status line. Finnhub is a data-only key (price
+     * lookups), not a chat provider, so it's deliberately excluded here -
+     * having only a Finnhub key shouldn't claim "chat is ready". */
     fun hasAnyKey(context: Context): Boolean =
-        Provider.values().any { hasKey(context, it) }
+        listOf(Provider.GEMINI, Provider.GROQ, Provider.OPENROUTER).any { hasKey(context, it) }
 }

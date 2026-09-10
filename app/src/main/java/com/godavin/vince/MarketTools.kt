@@ -86,4 +86,62 @@ object MarketTools {
             }
         }
     }
+
+    // Finnhub's free tier reliably covers crypto and forex via these
+    // documented exchange-prefixed symbol formats. Deliberately does NOT
+    // include gold/silver/indices - Finnhub's free-tier coverage there is
+    // inconsistent and not something to guess at; those stay Yahoo-only.
+    private val FINNHUB_SYMBOL_MAP = mapOf(
+        "bitcoin" to "BINANCE:BTCUSDT",
+        "btc" to "BINANCE:BTCUSDT",
+        "ethereum" to "BINANCE:ETHUSDT",
+        "eth" to "BINANCE:ETHUSDT",
+        "eurusd" to "OANDA:EUR_USD",
+        "gbpusd" to "OANDA:GBP_USD",
+        "usdjpy" to "OANDA:USD_JPY",
+    )
+
+    /** Tries Yahoo first (works for everything in TICKER_MAP); if that
+     * fails AND this symbol has a known Finnhub mapping AND a Finnhub key
+     * is saved, falls back to Finnhub before giving up. */
+    suspend fun fetchPriceWithFallback(
+        context: android.content.Context,
+        displayName: String,
+        yahooTicker: String
+    ): Result<Double> {
+        val yahooResult = fetchPrice(yahooTicker)
+        if (yahooResult.isSuccess) return yahooResult
+
+        val finnhubSymbol = FINNHUB_SYMBOL_MAP[displayName] ?: return yahooResult
+        val finnhubKey = ApiKeyStore.getKey(context, Provider.FINNHUB)
+        if (finnhubKey.isBlank()) return yahooResult
+
+        return fetchFinnhubPrice(finnhubSymbol, finnhubKey)
+    }
+
+    private suspend fun fetchFinnhubPrice(symbol: String, apiKey: String): Result<Double> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("https://finnhub.io/api/v1/quote?symbol=$symbol&token=$apiKey")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext Result.failure(Exception("Finnhub error (${response.code})"))
+                    }
+                    val body = response.body?.string().orEmpty()
+                    val root = JSONObject(body)
+                    val price = root.optDouble("c", Double.NaN)
+                    if (price.isNaN() || price == 0.0) {
+                        Result.failure(Exception("Finnhub returned no price for $symbol"))
+                    } else {
+                        Result.success(price)
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
 }

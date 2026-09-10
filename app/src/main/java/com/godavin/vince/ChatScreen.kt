@@ -57,7 +57,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             // guess at a fact a real source can answer exactly. Only
             // falls through to the AI providers if this isn't a
             // time/price question.
-            val localReply = RealTimeTools.handleLocalCommand(text)
+            val localReply = RealTimeTools.handleLocalCommand(context, text)
             val reply = localReply ?: BrainRouter.sendMessage(context, text)
             val replyMsg = ChatMessage(fromUser = false, text = reply)
             messages.add(replyMsg)

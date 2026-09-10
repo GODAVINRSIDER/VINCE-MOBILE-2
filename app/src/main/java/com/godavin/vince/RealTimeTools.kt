@@ -1,16 +1,17 @@
 package com.godavin.vince
 
+import android.content.Context
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
  * Same "deterministic local handler first, AI brain as fallback" pattern
- * PC-VINCE's commands.py already uses for things like price/time - never
- * let the AI guess at a fact the device or a real data source can answer
- * exactly. Checked before BrainRouter in ChatScreen's send(); returns
- * null if this message isn't a time/price question, in which case it
- * falls through to the normal AI chat path unchanged.
+ * PC-VINCE's commands.py already uses for things like price/time/news -
+ * never let the AI guess at a fact a real data source can answer exactly.
+ * Checked before BrainRouter in ChatScreen's send(); returns null if this
+ * message isn't a time/price/news question, in which case it falls
+ * through to the normal AI chat path unchanged.
  *
  * Time is answered instantly from the phone's own clock/timezone - no
  * network call needed, and unlike the PC (which has no idea where the
@@ -28,8 +29,13 @@ object RealTimeTools {
         "price of", "current price", "market price", "trading at", "how much is",
         "what's the price", "whats the price", "price is", "worth right now"
     )
+    private val NEWS_TRIGGERS = listOf(
+        "high impact", "high-impact", "economic calendar", "upcoming news",
+        "upcoming events", "market news", "news calendar", "economic events",
+        "what's on the calendar", "whats on the calendar"
+    )
 
-    suspend fun handleLocalCommand(text: String): String? {
+    suspend fun handleLocalCommand(context: Context, text: String): String? {
         val lower = text.lowercase()
 
         if (TIME_TRIGGERS.any { lower.contains(it) }) {
@@ -40,10 +46,18 @@ object RealTimeTools {
             return currentDateReply()
         }
 
+        if (NEWS_TRIGGERS.any { lower.contains(it) }) {
+            val result = NewsTools.getUpcomingHighImpact()
+            return result.fold(
+                onSuccess = { it },
+                onFailure = { e -> "Couldn't fetch the economic calendar right now. (${e.message})" }
+            )
+        }
+
         val symbolMatch = MarketTools.matchSymbol(lower)
         if (symbolMatch != null && PRICE_TRIGGERS.any { lower.contains(it) }) {
             val (displayName, ticker) = symbolMatch
-            val result = MarketTools.fetchPrice(ticker)
+            val result = MarketTools.fetchPriceWithFallback(context, displayName, ticker)
             return result.fold(
                 onSuccess = { price -> "The current price of ${displayName.uppercase()} is $price." },
                 onFailure = { e -> "Couldn't fetch the current price for ${displayName.uppercase()} right now. (${e.message})" }

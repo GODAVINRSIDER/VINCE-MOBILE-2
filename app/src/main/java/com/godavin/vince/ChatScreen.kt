@@ -29,18 +29,24 @@ import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-// Stage 9 - a real chart-analysis prompt (key levels, trend, structure,
-// an honest read), not a generic "describe this image" - matches
-// Vincent's actual price-action/SMC trading approach. Used as the
-// default whenever a photo/screen capture is sent with no typed
-// question; a typed question always overrides this.
+// Stage 10 - real chart-analysis prompt: a quick one-line verdict up
+// front (trend / key level type / rough probability), THEN the detailed
+// interactive breakdown - matches Vincent's actual price-action/SMC
+// trading approach and how he wants to skim it at a glance first. Used
+// as the default whenever a photo/screen capture is sent with no typed
+// question; a typed question always overrides this. This text is sent
+// to the AI but never shown in the chat bubble itself (see
+// sendBitmapForAnalysis below) - only what Vincent actually typed shows.
 private const val DEFAULT_CHART_PROMPT = "You're looking at a trading chart for an " +
-    "experienced price-action/smart-money-concepts trader. Give a focused, interactive " +
-    "read: the key support and resistance levels or liquidity zones visible, the current " +
-    "trend or range, any notable structure (order blocks, fair value gaps, trendlines, " +
-    "break of structure), and your honest thoughts on what the chart is suggesting right " +
-    "now. Be direct and specific like a second pair of eyes on the chart, not a generic " +
-    "disclaimer-heavy description."
+    "experienced price-action/smart-money-concepts trader. Start with ONE quick summary " +
+    "line in this exact style: 'This chart on this [timeframe if visible] is in a " +
+    "[downtrend/uptrend/range]; key level spotted: [FVG/order block/support/resistance/" +
+    "breakout-retest/etc]; roughly [XX-YY]% probability for a [buy/sell] position.' Then, " +
+    "on a new line, give a focused interactive breakdown: the key support/resistance " +
+    "levels or liquidity zones visible, notable structure (order blocks, fair value gaps, " +
+    "trendlines, break of structure), and your honest thoughts on what the chart is " +
+    "suggesting. Be direct and specific like a second pair of eyes on the chart, not a " +
+    "generic disclaimer-heavy description."
 
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
@@ -50,13 +56,8 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
-    // Stage 5 - whether VINCE speaks its replies out loud. Defaults on for
-    // push-to-talk use; a user who only types can flip it off.
     var speakReplies by remember { mutableStateOf(true) }
 
-    // Loads this specific thread's saved history on first open - keyed on
-    // threadId so switching threads via the sidebar re-loads correctly
-    // instead of reusing whatever was in state from the previous thread.
     val messages = remember(threadId) {
         mutableStateListOf<ChatMessage>().apply {
             ConversationStore.getThread(context, threadId)?.messages?.let { addAll(it) }
@@ -74,11 +75,6 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         sending = true
 
         scope.launch {
-            // Stage 6 - check for a deterministic time/price answer first,
-            // same discipline PC-VINCE already uses: never let the AI
-            // guess at a fact a real source can answer exactly. Only
-            // falls through to the AI providers if this isn't a
-            // time/price question.
             val localReply = RealTimeTools.handleLocalCommand(context, text)
             val reply = localReply ?: BrainRouter.sendMessage(context, text)
             val replyMsg = ChatMessage(fromUser = false, text = reply)
@@ -94,9 +90,6 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
-    // Launches Android's built-in speech-to-text UI. On a result, the
-    // recognized text is sent straight away - push-to-talk, not
-    // "transcribe then let me edit it first".
     val speechLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -136,20 +129,19 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
-    // Stage 8 - camera vision. Uses the system Camera app via an implicit
-    // intent (ACTION_IMAGE_CAPTURE through the TakePicture contract) so
-    // VINCE never needs its own CAMERA permission - the Camera app
-    // handles that itself. A FileProvider hands it a place to write the
-    // full-resolution photo that VINCE can then read back.
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Shared by both camera photos and screen captures - sends a bitmap
-    // to Gemini vision and posts the result as a normal chat message.
-    // label distinguishes "[Photo]" vs "[Screen]" in the chat history.
-    fun sendBitmapForAnalysis(bitmap: Bitmap, question: String, label: String) {
+    // Shared by both camera photos and screen captures. `question` is
+    // the FULL prompt actually sent to the AI (default or typed).
+    // `typedByUser` is what Vincent actually typed, or null if he left
+    // it blank and the default prompt was used - the chat bubble only
+    // ever shows typedByUser, never the full default instruction text,
+    // so nothing internal leaks into the visible conversation.
+    fun sendBitmapForAnalysis(bitmap: Bitmap, question: String, kind: String, typedByUser: String?) {
         if (sending) return
 
-        val userMsg = ChatMessage(fromUser = true, text = "[$label] $question")
+        val displayText = if (typedByUser.isNullOrBlank()) "[$kind]" else "[$kind] $typedByUser"
+        val userMsg = ChatMessage(fromUser = true, text = displayText)
         messages.add(userMsg)
         ConversationStore.addMessage(context, threadId, userMsg)
         input = ""
@@ -163,10 +155,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 val result = GeminiVision.describeImage(apiKey, baos.toByteArray(), question)
                 result.fold(
                     onSuccess = { it },
-                    onFailure = { e -> "Couldn't analyze the $label. (${e.message})" }
+                    onFailure = { e -> "Couldn't analyze the $kind. (${e.message})" }
                 )
             } catch (e: Exception) {
-                "Couldn't process the $label. (${e.message})"
+                "Couldn't process the $kind. (${e.message})"
             }
 
             val replyMsg = ChatMessage(fromUser = false, text = reply)
@@ -182,7 +174,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
-    fun sendImage(uri: Uri, question: String) {
+    fun sendImage(uri: Uri, question: String, typedByUser: String?) {
         if (sending) return
         sending = true
         input = ""
@@ -194,7 +186,8 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 null
             }
             if (bitmap == null) {
-                val userMsg = ChatMessage(fromUser = true, text = "[Photo] $question")
+                val displayText = if (typedByUser.isNullOrBlank()) "[Photo]" else "[Photo] $typedByUser"
+                val userMsg = ChatMessage(fromUser = true, text = displayText)
                 messages.add(userMsg)
                 ConversationStore.addMessage(context, threadId, userMsg)
                 val replyMsg = ChatMessage(fromUser = false, text = "Couldn't read the captured photo.")
@@ -205,8 +198,8 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     listState.animateScrollToItem(messages.size - 1)
                 }
             } else {
-                sending = false // sendBitmapForAnalysis sets its own sending=true right after
-                sendBitmapForAnalysis(bitmap, question, "Photo")
+                sending = false
+                sendBitmapForAnalysis(bitmap, question, "Photo", typedByUser)
             }
         }
     }
@@ -216,8 +209,9 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     ) { success ->
         val uri = pendingPhotoUri
         if (success && uri != null) {
-            val question = input.trim().ifBlank { DEFAULT_CHART_PROMPT }
-            sendImage(uri, question)
+            val typed = input.trim()
+            val question = typed.ifBlank { DEFAULT_CHART_PROMPT }
+            sendImage(uri, question, typed.ifBlank { null })
         }
     }
 
@@ -229,10 +223,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         cameraLauncher.launch(uri)
     }
 
-    // Stage 9 - screen vision. Reads whatever app is currently on screen
-    // (TradingView, WhatsApp, anything) rather than a hardcoded app.
-    // Android requires the permission prompt fresh each capture session -
-    // that's OS design, not something VINCE can skip.
+    // Stage 10 - screen vision now runs through ScreenCaptureService (a
+    // proper foreground service), not a bare in-Activity call - the
+    // generalized, version-safe fix for the capture failure hit during
+    // testing (see ScreenCaptureService's docstring for why).
     val mediaProjectionManager = remember {
         context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
     }
@@ -243,27 +237,32 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     ) { result ->
         val data = result.data
         if (result.resultCode == Activity.RESULT_OK && data != null) {
-            val question = input.trim().ifBlank { DEFAULT_CHART_PROMPT }
-            scope.launch {
-                val bitmap = screenCaptureHelper.captureSingleFrame(
-                    mediaProjectionManager, result.resultCode, data
-                )
+            val typed = input.trim()
+            val question = typed.ifBlank { DEFAULT_CHART_PROMPT }
+
+            ScreenCaptureBridge.awaitCapture { bitmap ->
                 if (bitmap != null) {
-                    sendBitmapForAnalysis(bitmap, question, "Screen")
+                    sendBitmapForAnalysis(bitmap, question, "Screen", typed.ifBlank { null })
                 } else {
-                    val userMsg = ChatMessage(fromUser = true, text = "[Screen] $question")
+                    val displayText = if (typed.isBlank()) "[Screen]" else "[Screen] $typed"
+                    val userMsg = ChatMessage(fromUser = true, text = displayText)
                     messages.add(userMsg)
                     ConversationStore.addMessage(context, threadId, userMsg)
                     val replyMsg = ChatMessage(
                         fromUser = false,
-                        text = "Couldn't capture the screen - the capture may have been " +
-                            "refused by Android on this device/version. Try again, and " +
-                            "if it keeps failing, that's worth reporting exactly as it happens."
+                        text = "Couldn't capture the screen. Try again - if it keeps " +
+                            "failing, that's worth reporting exactly as it happens."
                     )
                     messages.add(replyMsg)
                     ConversationStore.addMessage(context, threadId, replyMsg)
                 }
             }
+
+            val serviceIntent = Intent(context, ScreenCaptureService::class.java).apply {
+                putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+            }
+            ContextCompat.startForegroundService(context, serviceIntent)
         }
     }
 
@@ -326,34 +325,39 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        // Stage 10 layout fix - the input field now gets its own full-width
+        // row, and the four actions (Mic/Cam/Screen/Send) sit on a second,
+        // evenly-spaced row below it as compact icon buttons. Cramming a
+        // text field plus four labeled pill buttons into one row was what
+        // squeezed everything (and, on narrow screens, visibly broke the
+        // Send button's layout) - splitting into two rows fixes it for any
+        // screen width rather than just shrinking things slightly.
+        Column(modifier = Modifier.padding(16.dp)) {
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("Message VINCE...") },
                 singleLine = true
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = { onMicTapped() }, enabled = !sending) {
-                Text("Mic")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = { onCameraTapped() }, enabled = !sending) {
-                Text("Cam")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(onClick = { onScreenTapped() }, enabled = !sending) {
-                Text("Screen")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { send() }, enabled = !sending) {
-                Text("Send")
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(onClick = { onMicTapped() }, enabled = !sending) {
+                    Text("🎤")
+                }
+                OutlinedButton(onClick = { onCameraTapped() }, enabled = !sending) {
+                    Text("📷")
+                }
+                OutlinedButton(onClick = { onScreenTapped() }, enabled = !sending) {
+                    Text("🖥")
+                }
+                Button(onClick = { send() }, enabled = !sending) {
+                    Text("Send")
+                }
             }
         }
     }

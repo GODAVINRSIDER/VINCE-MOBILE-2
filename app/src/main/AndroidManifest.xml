@@ -6,6 +6,13 @@
     <!-- Stage 5 - push-to-talk voice input -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Stage 10 - required for ScreenCaptureService to run as a proper
+         foreground service (Google's documented requirement for
+         MediaProjection, enforced strictly from Android 14+). Harmless
+         on older Android versions where it's simply not needed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
     <application
         android:allowBackup="true"
         android:label="@string/app_name"
@@ -33,6 +40,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Stage 10 - performs screen capture inside a proper foreground
+             service, per Google's documented MediaProjection requirement. -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
     </application>
 </manifest>

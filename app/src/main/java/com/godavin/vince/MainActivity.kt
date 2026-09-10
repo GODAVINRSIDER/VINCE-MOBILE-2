@@ -80,7 +80,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 5 - voice in/out",
+            text = "STAGE 6 - real-time price + time",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )

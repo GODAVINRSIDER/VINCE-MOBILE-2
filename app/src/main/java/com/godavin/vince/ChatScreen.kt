@@ -52,7 +52,13 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         sending = true
 
         scope.launch {
-            val reply = BrainRouter.sendMessage(context, text)
+            // Stage 6 - check for a deterministic time/price answer first,
+            // same discipline PC-VINCE already uses: never let the AI
+            // guess at a fact a real source can answer exactly. Only
+            // falls through to the AI providers if this isn't a
+            // time/price question.
+            val localReply = RealTimeTools.handleLocalCommand(text)
+            val reply = localReply ?: BrainRouter.sendMessage(context, text)
             val replyMsg = ChatMessage(fromUser = false, text = reply)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)

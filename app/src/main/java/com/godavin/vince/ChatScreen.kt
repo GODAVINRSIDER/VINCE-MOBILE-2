@@ -1,10 +1,13 @@
 package com.godavin.vince
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +28,19 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.io.File
+
+// Stage 9 - a real chart-analysis prompt (key levels, trend, structure,
+// an honest read), not a generic "describe this image" - matches
+// Vincent's actual price-action/SMC trading approach. Used as the
+// default whenever a photo/screen capture is sent with no typed
+// question; a typed question always overrides this.
+private const val DEFAULT_CHART_PROMPT = "You're looking at a trading chart for an " +
+    "experienced price-action/smart-money-concepts trader. Give a focused, interactive " +
+    "read: the key support and resistance levels or liquidity zones visible, the current " +
+    "trend or range, any notable structure (order blocks, fair value gaps, trendlines, " +
+    "break of structure), and your honest thoughts on what the chart is suggesting right " +
+    "now. Be direct and specific like a second pair of eyes on the chart, not a generic " +
+    "disclaimer-heavy description."
 
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
@@ -127,10 +143,13 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     // full-resolution photo that VINCE can then read back.
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
-    fun sendImage(uri: Uri, question: String) {
+    // Shared by both camera photos and screen captures - sends a bitmap
+    // to Gemini vision and posts the result as a normal chat message.
+    // label distinguishes "[Photo]" vs "[Screen]" in the chat history.
+    fun sendBitmapForAnalysis(bitmap: Bitmap, question: String, label: String) {
         if (sending) return
 
-        val userMsg = ChatMessage(fromUser = true, text = "[Photo] $question")
+        val userMsg = ChatMessage(fromUser = true, text = "[$label] $question")
         messages.add(userMsg)
         ConversationStore.addMessage(context, threadId, userMsg)
         input = ""
@@ -138,23 +157,16 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
         scope.launch {
             val reply = try {
-                val bitmap = context.contentResolver.openInputStream(uri)?.use {
-                    BitmapFactory.decodeStream(it)
-                }
-                if (bitmap == null) {
-                    "Couldn't read the captured photo."
-                } else {
-                    val baos = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-                    val apiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
-                    val result = GeminiVision.describeImage(apiKey, baos.toByteArray(), question)
-                    result.fold(
-                        onSuccess = { it },
-                        onFailure = { e -> "Couldn't analyze the photo. (${e.message})" }
-                    )
-                }
+                val baos = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+                val apiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+                val result = GeminiVision.describeImage(apiKey, baos.toByteArray(), question)
+                result.fold(
+                    onSuccess = { it },
+                    onFailure = { e -> "Couldn't analyze the $label. (${e.message})" }
+                )
             } catch (e: Exception) {
-                "Couldn't process the photo. (${e.message})"
+                "Couldn't process the $label. (${e.message})"
             }
 
             val replyMsg = ChatMessage(fromUser = false, text = reply)
@@ -170,14 +182,41 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
+    fun sendImage(uri: Uri, question: String) {
+        if (sending) return
+        sending = true
+        input = ""
+
+        scope.launch {
+            val bitmap = try {
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                null
+            }
+            if (bitmap == null) {
+                val userMsg = ChatMessage(fromUser = true, text = "[Photo] $question")
+                messages.add(userMsg)
+                ConversationStore.addMessage(context, threadId, userMsg)
+                val replyMsg = ChatMessage(fromUser = false, text = "Couldn't read the captured photo.")
+                messages.add(replyMsg)
+                ConversationStore.addMessage(context, threadId, replyMsg)
+                sending = false
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
+                }
+            } else {
+                sending = false // sendBitmapForAnalysis sets its own sending=true right after
+                sendBitmapForAnalysis(bitmap, question, "Photo")
+            }
+        }
+    }
+
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         val uri = pendingPhotoUri
         if (success && uri != null) {
-            val question = input.trim().ifBlank {
-                "Describe what's in this image, including any visible text, numbers, or chart data."
-            }
+            val question = input.trim().ifBlank { DEFAULT_CHART_PROMPT }
             sendImage(uri, question)
         }
     }
@@ -188,6 +227,48 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         val uri = FileProvider.getUriForFile(context, "com.godavin.vince.fileprovider", file)
         pendingPhotoUri = uri
         cameraLauncher.launch(uri)
+    }
+
+    // Stage 9 - screen vision. Reads whatever app is currently on screen
+    // (TradingView, WhatsApp, anything) rather than a hardcoded app.
+    // Android requires the permission prompt fresh each capture session -
+    // that's OS design, not something VINCE can skip.
+    val mediaProjectionManager = remember {
+        context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    }
+    val screenCaptureHelper = remember { ScreenCaptureHelper(context) }
+
+    val screenPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            val question = input.trim().ifBlank { DEFAULT_CHART_PROMPT }
+            scope.launch {
+                val bitmap = screenCaptureHelper.captureSingleFrame(
+                    mediaProjectionManager, result.resultCode, data
+                )
+                if (bitmap != null) {
+                    sendBitmapForAnalysis(bitmap, question, "Screen")
+                } else {
+                    val userMsg = ChatMessage(fromUser = true, text = "[Screen] $question")
+                    messages.add(userMsg)
+                    ConversationStore.addMessage(context, threadId, userMsg)
+                    val replyMsg = ChatMessage(
+                        fromUser = false,
+                        text = "Couldn't capture the screen - the capture may have been " +
+                            "refused by Android on this device/version. Try again, and " +
+                            "if it keeps failing, that's worth reporting exactly as it happens."
+                    )
+                    messages.add(replyMsg)
+                    ConversationStore.addMessage(context, threadId, replyMsg)
+                }
+            }
+        }
+    }
+
+    fun onScreenTapped() {
+        screenPermissionLauncher.launch(screenCaptureHelper.createCaptureIntent(mediaProjectionManager))
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -265,6 +346,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedButton(onClick = { onCameraTapped() }, enabled = !sending) {
                 Text("Cam")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(onClick = { onScreenTapped() }, enabled = !sending) {
+                Text("Screen")
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = { send() }, enabled = !sending) {

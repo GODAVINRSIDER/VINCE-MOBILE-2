@@ -24,6 +24,7 @@ import com.godavin.vince.ui.theme.VinceTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VoiceOutput.init(this)
         setContent {
             VinceTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -79,7 +80,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 4 - multi-API fallback",
+            text = "STAGE 5 - voice in/out",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )

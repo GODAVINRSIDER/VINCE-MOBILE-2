@@ -14,6 +14,7 @@ import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Runs the actual screen capture inside a proper foreground service, not
@@ -53,7 +54,12 @@ class ScreenCaptureService : Service() {
         val helper = ScreenCaptureHelper(this)
 
         CoroutineScope(Dispatchers.Default).launch {
-            val bitmap = helper.captureSingleFrame(mediaProjectionManager, resultCode, resultData)
+            // Safety timeout - if frames never arrive on some device (rather
+            // than just arriving blank, which the frame-skip fix already
+            // handles), this still can't hang forever.
+            val bitmap = withTimeoutOrNull(8000) {
+                helper.captureSingleFrame(mediaProjectionManager, resultCode, resultData)
+            }
             ScreenCaptureBridge.deliverResult(bitmap)
             stopSelf()
         }

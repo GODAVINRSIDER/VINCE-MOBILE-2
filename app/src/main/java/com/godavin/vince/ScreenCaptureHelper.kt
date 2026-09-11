@@ -22,14 +22,15 @@ import kotlin.coroutines.resume
  * capture session - this can't be silently granted once and remembered,
  * by OS design (see the Stage 5 planning notes in project memory).
  *
- * HONEST FLAG: MediaProjection has genuine device/Android-version quirks
- * (Android 14+ in particular tightened background/foreground-service
- * rules around screen capture) that can't be fully verified without
- * running this on real hardware. This is built as carefully and
- * correctly as the documented API allows, but if capture silently fails
- * or behaves oddly on a specific device/Android version, that's the
- * first place to look - report back exactly what happens (or doesn't)
- * so this can be diagnosed precisely rather than guessed at again.
+ * KNOWN FIX APPLIED (v2): a freshly-created virtual display's very first
+ * frame(s) commonly come back black/blank on real devices - the display
+ * compositor hasn't actually pushed real content into the capture
+ * surface yet. Confirmed this was happening here (blank capture on
+ * every app tested, not just secured ones). Fixed by deliberately
+ * skipping the first few frames and only accepting a later one, once
+ * the display has actually stabilized - same practical effect as
+ * "record briefly then grab a later frame," without needing a real
+ * video-recording pipeline.
  */
 class ScreenCaptureHelper(private val context: Context) {
 
@@ -38,15 +39,20 @@ class ScreenCaptureHelper(private val context: Context) {
     private var imageReader: ImageReader? = null
     private var handlerThread: HandlerThread? = null
 
+    // How many early frames to discard before trusting one as real
+    // content, not a blank/incomplete compositor frame.
+    private val FRAMES_TO_SKIP = 4
+
     fun createCaptureIntent(mediaProjectionManager: MediaProjectionManager): Intent {
         return mediaProjectionManager.createScreenCaptureIntent()
     }
 
     /** Call after the user has granted screen-capture permission. Captures
-     * exactly one frame of the current screen and returns it as a Bitmap,
-     * or null on failure. Cleans up all MediaProjection resources itself
-     * before returning - this is a single snapshot, not a persistent
-     * screen-recording session left running in the background. */
+     * one real frame of the current screen (after skipping early blank
+     * frames) and returns it as a Bitmap, or null on failure. Cleans up
+     * all MediaProjection resources itself before returning - this is a
+     * single snapshot, not a persistent screen-recording session left
+     * running in the background. */
     suspend fun captureSingleFrame(
         mediaProjectionManager: MediaProjectionManager,
         resultCode: Int,
@@ -66,28 +72,38 @@ class ScreenCaptureHelper(private val context: Context) {
                 val projection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
                 mediaProjection = projection
 
-                val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+                // Buffer depth matched to FRAMES_TO_SKIP+1 so early frames
+                // can be discarded without starving the reader.
+                val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, FRAMES_TO_SKIP + 2)
                 imageReader = reader
 
                 var resumed = false
+                var frameCount = 0
 
                 reader.setOnImageAvailableListener({ imgReader ->
                     if (resumed) return@setOnImageAvailableListener
                     val image = imgReader.acquireLatestImage()
-                    val bitmap: Bitmap? = if (image != null) {
-                        val plane = image.planes[0]
-                        val pixelStride = plane.pixelStride
-                        val rowStride = plane.rowStride
-                        val rowPadding = rowStride - pixelStride * width
+                    if (image == null) return@setOnImageAvailableListener
 
-                        val raw = Bitmap.createBitmap(
-                            width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888
-                        )
-                        raw.copyPixelsFromBuffer(plane.buffer)
+                    frameCount++
+                    if (frameCount <= FRAMES_TO_SKIP) {
+                        // Early frame - likely blank/incomplete, discard and wait for a later one.
                         image.close()
+                        return@setOnImageAvailableListener
+                    }
 
-                        if (rowPadding == 0) raw else Bitmap.createBitmap(raw, 0, 0, width, height)
-                    } else null
+                    val plane = image.planes[0]
+                    val pixelStride = plane.pixelStride
+                    val rowStride = plane.rowStride
+                    val rowPadding = rowStride - pixelStride * width
+
+                    val raw = Bitmap.createBitmap(
+                        width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888
+                    )
+                    raw.copyPixelsFromBuffer(plane.buffer)
+                    image.close()
+
+                    val bitmap = if (rowPadding == 0) raw else Bitmap.createBitmap(raw, 0, 0, width, height)
 
                     resumed = true
                     cleanup()

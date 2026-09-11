@@ -12,10 +12,12 @@ import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -75,7 +77,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         sending = true
 
         scope.launch {
+            // Stage 13 - real-time (price/time/news) checked first, then
+            // memory/reminder commands, then fall through to the AI.
             val localReply = RealTimeTools.handleLocalCommand(context, text)
+                ?: PersonalTools.handleLocalCommand(context, text)
             val reply = localReply ?: BrainRouter.sendMessage(context, text)
             val replyMsg = ChatMessage(fromUser = false, text = reply)
             messages.add(replyMsg)
@@ -288,6 +293,39 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         screenPermissionLauncher.launch(screenCaptureHelper.createCaptureIntent(mediaProjectionManager))
     }
 
+    // Stage 13 - manual upload fallback. Lets Vincent screenshot himself
+    // (Android's own screenshot gesture) and hand the image straight to
+    // VINCE, sidestepping MediaProjection entirely - useful as a reliable
+    // backup for any app/device combo where Screen vision still doesn't
+    // cooperate. Uses Android's modern Photo Picker (PickVisualMedia),
+    // which needs no storage/media permission at all - the system handles
+    // access, VINCE only ever sees the one image actually picked. Same
+    // "type a question first, tap the button" pattern as Cam/Screen.
+    val uploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val typed = input.trim()
+            val question = typed.ifBlank { DEFAULT_CHART_PROMPT }
+            val bitmap = try {
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                null
+            }
+            if (bitmap != null) {
+                sendBitmapForAnalysis(bitmap, question, "Image", typed.ifBlank { null })
+            }
+        }
+    }
+
+    fun onUploadTapped() {
+        uploadLauncher.launch(
+            androidx.activity.result.PickVisualMediaRequest(
+                ActivityResultContracts.PickVisualMedia.ImageOnly
+            )
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -343,13 +381,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             }
         }
 
-        // Stage 10 layout fix - the input field now gets its own full-width
-        // row, and the four actions (Mic/Cam/Screen/Send) sit on a second,
-        // evenly-spaced row below it as compact icon buttons. Cramming a
-        // text field plus four labeled pill buttons into one row was what
-        // squeezed everything (and, on narrow screens, visibly broke the
-        // Send button's layout) - splitting into two rows fixes it for any
-        // screen width rather than just shrinking things slightly.
+        // Stage 13 - button row is now horizontally scrollable, not just
+        // evenly-spaced, so it can safely hold more buttons in the future
+        // (this stage added Upload) without ever cramping or breaking on
+        // a narrow screen again.
         Column(modifier = Modifier.padding(16.dp)) {
             OutlinedTextField(
                 value = input,
@@ -360,8 +395,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(onClick = { onMicTapped() }, enabled = !sending) {
@@ -372,6 +409,9 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 }
                 OutlinedButton(onClick = { onScreenTapped() }, enabled = !sending) {
                     Text("🖥")
+                }
+                OutlinedButton(onClick = { onUploadTapped() }, enabled = !sending) {
+                    Text("🖼")
                 }
                 Button(onClick = { send() }, enabled = !sending) {
                     Text("Send")

@@ -20,9 +20,22 @@ object BrainRouter {
     suspend fun sendMessage(context: Context, userMessage: String): String {
         val attempts = mutableListOf<String>()
 
+        // Stage 13 - prepend durable memory (name, saved facts) so it's
+        // present regardless of which chat thread this is, not just
+        // whatever happens to be in this thread's own history. None of
+        // the provider clients have a separate "system role" wired up
+        // yet, so this rides along as part of the message text itself -
+        // simple and works identically across all three providers.
+        val contextBlock = StructuredMemory.buildContextBlock(context)
+        val fullMessage = if (contextBlock.isBlank()) {
+            userMessage
+        } else {
+            "$contextBlock\n\nUser: $userMessage"
+        }
+
         val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
         if (geminiKey.isNotBlank()) {
-            val result = GeminiClient.sendMessage(geminiKey, userMessage)
+            val result = GeminiClient.sendMessage(geminiKey, fullMessage)
             result.onSuccess { return it }
             attempts.add("Gemini: ${result.exceptionOrNull()?.message ?: "failed"}")
         }
@@ -33,7 +46,7 @@ object BrainRouter {
                 baseUrl = "https://api.groq.com/openai/v1/chat/completions",
                 apiKey = groqKey,
                 model = "openai/gpt-oss-120b",
-                userMessage = userMessage,
+                userMessage = fullMessage,
                 providerLabel = "Groq"
             )
             result.onSuccess { return it }
@@ -51,7 +64,7 @@ object BrainRouter {
                 // name that goes stale whenever THAT model gets rotated out
                 // (which is exactly what broke here the first time).
                 model = "openrouter/free",
-                userMessage = userMessage,
+                userMessage = fullMessage,
                 providerLabel = "OpenRouter"
             )
             result.onSuccess { return it }

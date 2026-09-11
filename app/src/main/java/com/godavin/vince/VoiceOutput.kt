@@ -28,7 +28,20 @@ object VoiceOutput {
 
     fun speak(text: String) {
         if (!ready || text.isBlank()) return
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        tts?.speak(stripMarkdownForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
+    }
+
+    /** Strips Markdown formatting characters (**, *, #, `, _) before
+     * handing text to the speech engine - TTS has no idea these are
+     * formatting symbols, so it was literally reading them aloud
+     * mid-sentence ("asterisk asterisk...", "hash hash..."), breaking up
+     * the flow. The on-screen chat text is untouched - only what's
+     * spoken gets cleaned. */
+    private fun stripMarkdownForSpeech(text: String): String {
+        return text
+            .replace(Regex("[*_#`]"), "")
+            .replace(Regex("\\n{2,}"), ". ")
+            .trim()
     }
 
     fun stop() {

@@ -258,11 +258,29 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 }
             }
 
-            val serviceIntent = Intent(context, ScreenCaptureService::class.java).apply {
-                putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
-                putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+            // Stage 11 fix - granting the permission returns control straight
+            // back to VINCE, so capturing immediately just captures VINCE's
+            // own screen, not whatever app was open before. Give the user a
+            // moment's warning, then send VINCE to the background - this
+            // naturally surfaces whatever app was behind it (TradingView,
+            // WhatsApp, etc.) BEFORE the actual capture happens.
+            android.widget.Toast.makeText(
+                context,
+                "Switch to what you want VINCE to read - capturing in 3 seconds",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+
+            scope.launch {
+                kotlinx.coroutines.delay(3000)
+                (context as? Activity)?.moveTaskToBack(true)
+                kotlinx.coroutines.delay(400) // let the app-switch animation actually finish
+
+                val serviceIntent = Intent(context, ScreenCaptureService::class.java).apply {
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+                }
+                ContextCompat.startForegroundService(context, serviceIntent)
             }
-            ContextCompat.startForegroundService(context, serviceIntent)
         }
     }
 

@@ -87,5 +87,21 @@
                 android:value="floating_voice_assistant_overlay" />
         </service>
 
+        <!-- Stage 15 - transparent trampoline activities so camera/screen
+             vision can be triggered from the floating widget (both need a
+             real Activity for their system permission dialogs). Neither
+             ever shows its own UI - Theme.NoDisplay plus finish()ing as
+             soon as their one job is done. -->
+        <activity
+            android:name=".OverlayCameraActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true" />
+        <activity
+            android:name=".OverlayScreenActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true" />
+
     </application>
 </manifest>

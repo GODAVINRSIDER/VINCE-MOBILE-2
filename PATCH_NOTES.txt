@@ -1,53 +1,60 @@
-STAGE 15 continued - real conversation memory + widget redesign
-===================================================================
+STAGE 15 COMPLETE - logo fix, voice dropdown, camera/screen from widget
+==========================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite, confirm app/src/main/res/drawable/ic_vince_triangle.xml
-exists afterward (new file - if it's missing, extraction didn't take).
+choose overwrite, confirm app/src/main/java/com/godavin/vince/
+OverlayCameraActivity.kt exists afterward (new file).
 
-WHAT'S FIXED THIS ROUND
---------------------------
+WHAT'S FIXED/ADDED THIS ROUND
+--------------------------------
 
-1. REAL CONVERSATION MEMORY (the CLARA screenshot bug)
-   Found the actual cause: every message sent to the AI was completely
-   stateless - only your newest typed message was ever sent, with zero
-   awareness of anything said earlier in that same thread. That's
-   exactly why CLARA forgot what "that answer" meant one message later,
-   and then didn't even recognize its own previous reply (7.65).
-   Fixed: every message now carries the recent conversation (up to the
-   last 20 messages in that thread) along with it, so the AI can
-   actually reason from what was already said - "multiply that by 130"
-   will now correctly resolve to the previous answer, across VINCE,
-   CLARA, and DAVINA alike. This is the flowing-conversation behavior
-   you asked for.
+1. LOGO SHAPE FIXED
+   Redrew the triangle mark wider and shallower (apex pulled further
+   down, top corners pulled wider) so the outer/inner nested triangles
+   actually read as a "V" shape like the reference image, instead of two
+   plain equilateral triangles. Same file (ic_vince_triangle.xml), same
+   spot on the floating widget.
 
-2. FLOATING WIDGET - REDESIGNED
-   - Circular, medium-sized bubble (was a big square before).
-   - At rest, it now shows the actual VINCE triangle logo (first real
-     version of the locked icon design) instead of a plain colored
-     circle with a letter.
-   - Tap to start a voice command: a colored halo ring appears around
-     the bubble in the active persona's color while it's listening,
-     then disappears once you're done talking.
-   - Hold to switch persona still works the same as before - only the
-     halo's color changes to match, the logo itself stays constant
-     (it's the app's own mark, not persona-specific).
-   - Drag still works the same as before.
+2. VINCE VOICE - NOW A DROPDOWN
+   Settings > VINCE voice is now a single dropdown field instead of the
+   scrollable list. Tap it, pick a voice from the list - it previews out
+   loud AND saves as VINCE's voice in that one tap. No pitch/rate
+   controls shown anywhere - just "which voice."
 
-3. REMINDERS - PARKED per your call
-   No further reminder patches this round since you've said you won't
-   be using that feature. Nothing removed, it's just not getting more
-   debugging effort until/unless you want to revisit it.
+3. CAMERA + SCREEN VISION NOW WORK FROM THE FLOATING WIDGET
+   This completes Stage 15 - the floating widget can now do everything
+   the in-app chat can:
+   - ONE finger, quick tap: voice command (unchanged)
+   - ONE finger, hold half a second: switch persona (unchanged)
+   - TWO fingers, quick tap together: camera vision - opens the camera,
+     analyzes the photo with the same chart-reading prompt as in-app
+     Camera, speaks the answer out loud
+   - TWO fingers, hold together half a second: screen vision - same
+     3-second "switch to what you want read" warning as in-app Screen,
+     then captures and speaks the answer
+   Both are genuinely invisible - no extra screen appears, just the
+   camera app opening (for camera) or the same warning toast (for
+   screen), then VINCE speaks the result and you're right back to
+   whatever you were doing. Two-finger gestures were used specifically
+   so they add zero delay to the everyday single-finger voice tap.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm ic_vince_triangle.xml exists under app/src/main/res/drawable/.
-2. Open a chat, ask CLARA (or any persona) a multi-step question like
-   the "45% of 17, now multiply that by 130" example - confirm it
-   actually carries the thread across replies now.
-3. Turn on the floating widget - confirm it's circular, medium-sized,
-   and shows the triangle logo at rest.
-4. Tap it, confirm the halo ring appears in the current persona's color
-   while listening, and disappears after.
-5. Hold it, confirm persona switches and the halo color changes to
-   match on the next tap.
+1. Confirm OverlayCameraActivity.kt and OverlayScreenActivity.kt both
+   exist after extraction.
+2. Look at the floating widget's logo - does it read as a "V" now?
+3. Settings > VINCE voice - confirm it's a dropdown, pick a voice,
+   confirm it previews and saves in one tap.
+4. Turn on the floating widget, single-finger tap it - still triggers
+   voice as before.
+5. Single-finger hold it - still switches persona as before.
+6. Two-finger tap it (both fingers down and up quickly, together) -
+   should open the camera and speak back a chart read on whatever photo
+   you take.
+7. Two-finger hold it (both fingers down, wait half a second, lift) -
+   should show the 3-second warning, then read whatever's on screen.
+
+If the two-finger gestures feel awkward on your phone (some devices
+handle multi-touch on floating overlay windows slightly differently),
+tell me exactly what happened and we'll adjust the gesture mapping
+rather than redesign from scratch.

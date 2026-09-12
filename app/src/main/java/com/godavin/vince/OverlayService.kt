@@ -198,25 +198,53 @@ class OverlayService : Service() {
         var startY = 0
         var isDrag = false
         var downTimeMillis = 0L
+        // Two-finger gestures give camera/screen vision their own entry
+        // points without adding any delay to the primary single-finger
+        // tap (voice) - two-finger tap = camera, two-finger hold = screen.
+        var twoFingerDownTimeMillis = 0L
+        var sawTwoFingers = false
 
         root.setOnTouchListener { _, event ->
-            when (event.action) {
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = event.rawX
                     downRawY = event.rawY
                     startX = params.x
                     startY = params.y
                     isDrag = false
+                    sawTwoFingers = false
                     downTimeMillis = System.currentTimeMillis()
                     true
                 }
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    if (event.pointerCount == 2) {
+                        sawTwoFingers = true
+                        isDrag = true // a second finger joining means "not a single-finger tap/hold"
+                        twoFingerDownTimeMillis = System.currentTimeMillis()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_POINTER_UP -> {
+                    if (sawTwoFingers && event.pointerCount == 2) {
+                        val heldMillis = System.currentTimeMillis() - twoFingerDownTimeMillis
+                        if (heldMillis >= 500) {
+                            launchScreenVision()
+                        } else {
+                            launchCameraVision()
+                        }
+                        sawTwoFingers = false
+                    }
+                    true
+                }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - downRawX).toInt()
-                    val dy = (event.rawY - downRawY).toInt()
-                    if (abs(dx) > 12 || abs(dy) > 12) isDrag = true
-                    params.x = startX + dx
-                    params.y = startY + dy
-                    windowManager.updateViewLayout(root, params)
+                    if (event.pointerCount == 1 && !sawTwoFingers) {
+                        val dx = (event.rawX - downRawX).toInt()
+                        val dy = (event.rawY - downRawY).toInt()
+                        if (abs(dx) > 12 || abs(dy) > 12) isDrag = true
+                        params.x = startX + dx
+                        params.y = startY + dy
+                        windowManager.updateViewLayout(root, params)
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
@@ -236,6 +264,20 @@ class OverlayService : Service() {
 
         windowManager.addView(root, params)
         overlayView = root
+    }
+
+    private fun launchCameraVision() {
+        val intent = Intent(this, OverlayCameraActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    private fun launchScreenVision() {
+        val intent = Intent(this, OverlayScreenActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 
     private fun setHaloColor(persona: Persona) {

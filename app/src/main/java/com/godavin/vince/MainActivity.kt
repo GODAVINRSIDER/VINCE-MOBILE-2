@@ -403,17 +403,18 @@ fun SystemChecksSection() {
 }
 
 /**
- * Stage 14 fix - VINCE voice. Automatic "find a male-labeled voice" name
- * matching doesn't work reliably (most engines, including Google's own,
- * don't label voices with the word "male" at all), so instead this lists
- * every voice this phone's TTS engine actually has, lets Vincent preview
- * each one out loud, and saves whichever one he picks for VINCE. One-time
- * setup per device, guaranteed correct instead of guessed.
+ * Stage 15 fix - VINCE voice, now a proper dropdown instead of a
+ * scrollable tap-list. Selecting an entry previews it immediately AND
+ * saves it as VINCE's voice in one action - no separate pitch/rate
+ * controls exposed here at all, just "which installed voice should
+ * VINCE use."
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VinceVoiceSection() {
     val voices = remember { VoiceOutput.availableVoiceNames() }
     var selected by remember { mutableStateOf(VoiceOutput.getVinceVoiceOverride()) }
+    var expanded by remember { mutableStateOf(false) }
 
     Text(
         text = "VINCE voice",
@@ -423,8 +424,8 @@ fun VinceVoiceSection() {
     )
     Spacer(modifier = Modifier.height(6.dp))
     Text(
-        text = "Tap a voice to hear it, then tap \"Use\" to set it as VINCE's voice. " +
-            "Until you pick one, VINCE uses a lower-pitched default voice.",
+        text = "Pick which installed voice VINCE uses. Selecting one previews it " +
+            "immediately. Until you pick one, VINCE uses a lower-pitched default voice.",
         fontSize = 12.sp,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     )
@@ -438,37 +439,33 @@ fun VinceVoiceSection() {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
     } else {
-        Column(modifier = Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
-            voices.forEach { voiceName ->
-                val isSelected = voiceName == selected
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = voiceName,
-                        fontSize = 13.sp,
-                        color = if (isSelected)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { VoiceOutput.previewVoice(voiceName) }
-                    )
-                    if (isSelected) {
-                        Text("In use", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                    } else {
-                        TextButton(onClick = {
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it }
+        ) {
+            TextField(
+                value = selected ?: "Default (lower-pitched)",
+                onValueChange = { },
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                voices.forEach { voiceName ->
+                    DropdownMenuItem(
+                        text = { Text(voiceName, fontSize = 13.sp) },
+                        onClick = {
                             VoiceOutput.setVinceVoiceOverride(voiceName)
+                            VoiceOutput.previewVoice(voiceName)
                             selected = voiceName
-                        }) {
-                            Text("Use", fontSize = 12.sp)
+                            expanded = false
                         }
-                    }
+                    )
                 }
             }
         }

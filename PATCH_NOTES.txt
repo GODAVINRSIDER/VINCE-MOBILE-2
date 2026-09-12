@@ -1,76 +1,65 @@
-STAGE 14 FIXES (v3) + STAGE 15 START — what's in this zip
-============================================================
+STAGE 15 (first slice) + carried-forward fixes
+=================================================
 
-EXTRACTION - same as last time, this is critical:
-1. Open your project folder ("VINCE MOBILE 2") - the one with .git, app,
-   .github already inside it.
-2. Extract this zip's contents STRAIGHT INTO that folder.
-3. Choose "Replace/Overwrite" when asked.
-4. Confirm app/src/main/java/com/godavin/vince/AppLauncher.kt exists
-   afterward - that's your sign it landed.
+EXTRACTION - same as always: extract straight into your project folder
+(the one with .git already in it), choose overwrite when asked, confirm
+app/src/main/java/com/godavin/vince/OverlayService.kt exists afterward.
 
-WHAT'S NEW IN THIS ROUND (on top of last patch)
--------------------------------------------------
+WHAT'S NEW THIS ROUND
+------------------------
+1. FLOATING MIC WIDGET (Stage 15, first working slice)
+   - Home screen now has a "Turn on floating widget" button. First tap
+     asks for the one-time "display over other apps" permission; tap
+     again after granting it to actually start the widget.
+   - A small draggable colored bubble appears on top of whatever app
+     you're in, showing the first letter of the active persona.
+   - TAP it: starts listening immediately (same mic as in-app), routes
+     what you say through the same command pipeline as normal chat,
+     speaks the reply out loud - no need to open VINCE first.
+   - HOLD it (half a second): cycles VINCE -> CLARA -> DAVINA, updates
+     the bubble's color/letter and confirms out loud.
+   - DRAG it: moves anywhere on screen, stays there.
+   - A "VINCE is running" notification stays up while the widget is
+     active - this is an Android requirement for any background service,
+     not something that can be hidden.
+   - NOT YET IN THIS SLICE: camera vision and screen vision from the
+     floating widget - both need a full Activity to request their
+     system permissions, so they're a fast follow-up once this slice is
+     confirmed working. Voice + persona-switch is what's testable now.
+   - Force-closing VINCE removes the widget entirely, as expected.
 
-1. VINCE MALE VOICE - changed approach
-   The old "search voice names for the word 'male'" trick doesn't work -
-   most engines, including the one built into basically every Android
-   phone, don't label voices that way at all (names look like
-   "en-us-x-iom-local", no gender word in them). So it was always
-   silently falling back to the lower-pitch version.
+2. VOICE PICKER STILL NOT WORKING - added diagnostics, not a full fix
+   yet since this needs your report. In Settings, under "System checks",
+   there's now a button to jump straight to your phone's Text-to-Speech
+   engine settings. Most likely cause: your phone's current speech
+   engine doesn't expose multiple selectable voices at all (common on
+   some budget-phone default engines) - if so, installing/selecting
+   Google's Text-to-Speech engine as the system default should populate
+   the list. Try this and tell me what the voice list actually shows
+   (empty? one entry? several?) so the next patch can target the real
+   cause instead of guessing again.
 
-   New approach: Settings now has a "VINCE voice" section listing every
-   voice this phone's engine actually has installed. Tap any voice name
-   to hear it, tap "Use" on the one that sounds right, done - it's saved
-   and VINCE uses it from then on. This is a one-time ~30 second setup
-   per device and is guaranteed to work, unlike guessing.
-   (A single WAV file can't work here - a WAV is one fixed recording,
-   but VINCE needs to speak whatever text comes up in conversation. That
-   needs an actual text-to-speech voice, not a sound clip. If none of the
-   installed voices sound right, the next step up is a paid cloud voice
-   API like ElevenLabs or Google Cloud TTS, which is a bigger, separate
-   feature - happy to build that if the on-device options aren't good
-   enough on your phone.)
-
-2. REMINDERS NOT FIRING IN BACKGROUND - real cause found
-   Reminders were only firing while the app was open. Cause: your phone's
-   Android skin (very common on Tecno/Infinix/Itel/Xiaomi-family phones)
-   aggressively kills background apps unless the app is explicitly
-   exempted from battery optimization - which silently stops the
-   reminder's alarm from ever reaching the app, even though the alarm
-   itself was correctly scheduled.
-   Fix: the app now asks, once on launch, to be exempted from battery
-   optimization (a system permission popup will appear - allow it).
-   NOTE: some phone brands also have a separate "Autostart" or
-   "Background app management" toggle in their own settings app (outside
-   Android's own settings) that Android has no API to control - if
-   reminders still don't fire in the background after allowing battery
-   optimization, check your phone's own Settings > Apps > VINCE for an
-   "Autostart" / "Allow background activity" toggle and enable it there
-   too. Tell me your phone brand/model if unsure and I'll get you exact
-   steps.
-
-3. APP TITLE - changed "VINCE 2.0" to "GODAVINRSIDER" on the home screen.
-
-4. PERSONA NAME BESIDE CHAT LIST ENTRIES - each thread in the Chats list
-   now shows which persona last replied in it, beside the title.
-
-CARRIED OVER FROM LAST PATCH (unchanged this round)
-------------------------------------------------------
-- Absolute-time reminders ("remind me at 4:30") alongside "in N minutes"
-- setExactAndAllowWhileIdle so reminders land on time once triggered
-- "open <app name>" launches other installed apps
-- Persona name beside each message inside a chat (same line, bold, colored)
+3. REMINDERS STILL ONLY FIRING WHILE APP OPEN - also added diagnostics.
+   Settings > System checks now shows whether battery-optimization
+   exemption is actually granted (it may not be, if you dismissed that
+   prompt) plus a button to open it directly. There's also a button to
+   jump to VINCE's app-details screen, since some phone brands hide a
+   separate "Autostart" toggle there that Android itself has no way to
+   trigger automatically. Check both, and tell me your phone brand/model
+   if reminders still don't fire in the background afterward - that's
+   the fastest way to get you the exact right toggle instead of guessing.
 
 TESTING CHECKLIST
--------------------
-1. Confirm AppLauncher.kt exists (see extraction step 4).
-2. Open Settings, scroll to "VINCE voice", tap a few names to preview,
-   tap "Use" on the one you want. Send a VINCE message and confirm.
-3. On launch, allow the "ignore battery optimization" prompt if it
-   appears. If it doesn't appear, your phone may already have granted it
-   - check Settings > Apps > VINCE > Battery.
-4. Set a reminder, then CLOSE the app fully (swipe it away from recents)
-   and confirm it still fires on time.
-5. Open Chats list - confirm each thread shows its persona beside the title.
-6. "open WhatsApp" (or any app) still opens it.
+--------------------
+1. Confirm OverlayService.kt exists after extraction.
+2. Home screen -> tap "Grant display over other apps" -> allow it ->
+   come back, tap "Turn on floating widget".
+3. Open any other app (e.g. your gallery). Confirm the bubble is visible
+   on top of it.
+4. Tap the bubble, say something like "what time is it" - confirm it
+   answers out loud.
+5. Hold the bubble - confirm it says the next persona's name and its
+   color/letter changes.
+6. Drag the bubble somewhere else on screen - confirm it stays put.
+7. Settings -> System checks -> check both statuses/buttons, report
+   back what they show.

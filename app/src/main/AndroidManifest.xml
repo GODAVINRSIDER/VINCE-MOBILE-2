@@ -28,6 +28,11 @@
          once, to be exempted from battery optimization. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Stage 15 - floating draggable mic overlay, shown on top of other
+         apps while VINCE runs in the background. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:allowBackup="true"
         android:label="@string/app_name"
@@ -67,6 +72,20 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+
+        <!-- Stage 15 - floating overlay mic service. specialUse is the
+             generic Android 14+ foreground-service type for services that
+             don't fit the predefined categories (mediaProjection, camera,
+             location, etc) - a floating assistant overlay is exactly that
+             case, hence the required subtype declaration below. -->
+        <service
+            android:name=".OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="floating_voice_assistant_overlay" />
+        </service>
 
     </application>
 </manifest>

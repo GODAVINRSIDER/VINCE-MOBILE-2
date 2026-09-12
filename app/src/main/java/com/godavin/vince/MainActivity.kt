@@ -114,6 +114,7 @@ fun RootScreen() {
 fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val keyIsSet = remember { ApiKeyStore.hasAnyKey(context) }
+    var overlayOn by remember { mutableStateOf(canDrawOverlays(context)) }
 
     Column(
         modifier = Modifier
@@ -130,7 +131,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 14 - persona switching",
+            text = "STAGE 15 - floating widget",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )
@@ -149,6 +150,55 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         OutlinedButton(onClick = onOpenSettings) {
             Text("Settings")
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Floating mic widget",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Tap the bubble to talk from any app - hold it to switch persona.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = {
+            if (!canDrawOverlays(context)) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            } else if (!overlayOn) {
+                context.startService(Intent(context, OverlayService::class.java))
+                overlayOn = true
+            } else {
+                context.stopService(Intent(context, OverlayService::class.java))
+                overlayOn = false
+            }
+        }) {
+            Text(
+                if (!canDrawOverlays(context)) "Grant \"display over other apps\""
+                else if (overlayOn) "Turn off floating widget"
+                else "Turn on floating widget"
+            )
+        }
+    }
+}
+
+/** Whether the "display over other apps" permission is granted -
+ * required before OverlayService can add its floating view. */
+fun canDrawOverlays(context: android.content.Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Settings.canDrawOverlays(context)
+    } else {
+        true
     }
 }
 
@@ -249,6 +299,106 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         VinceVoiceSection()
+
+        Spacer(modifier = Modifier.height(32.dp))
+        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        SystemChecksSection()
+    }
+}
+
+/**
+ * Quick diagnostic shortcuts for the two issues that code alone can't
+ * fully fix - both are Android/OEM settings screens, not app bugs:
+ *
+ * - If the voice picker list above is empty or only shows one voice,
+ *   this phone's current TTS engine likely doesn't expose multiple
+ *   voices at all (common on some OEM default engines). Switching the
+ *   system's default TTS engine to Google's (installable free from the
+ *   Play Store if not already present) reliably fixes this.
+ * - If reminders still only fire while the app is open even after
+ *   allowing "ignore battery optimization", this phone's brand likely
+ *   has its own separate "Autostart"/"Background activity" toggle
+ *   outside Android's own settings, which has no public API to trigger
+ *   automatically - the app-details screen is the closest common jump
+ *   point to find it from.
+ */
+@Composable
+fun SystemChecksSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    val batteryExempted = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+
+    Text(
+        text = "System checks",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary
+    )
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Text(
+        text = "Battery optimization: " + if (batteryExempted) "exempted (good)" else "NOT exempted",
+        fontSize = 13.sp,
+        color = if (batteryExempted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    if (!batteryExempted) {
+        OutlinedButton(onClick = {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) { }
+        }) {
+            Text("Allow VINCE to ignore battery optimization")
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+    }
+    Text(
+        text = "If reminders still don't fire with the app closed after allowing " +
+            "this, your phone's brand likely has its own separate Autostart / " +
+            "background-activity toggle. Tap below to open VINCE's app-details " +
+            "screen and look for it there (exact name varies by phone).",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    OutlinedButton(onClick = {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) { }
+    }) {
+        Text("Open VINCE app settings")
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    Text(
+        text = "If the VINCE voice list above is empty or only shows one entry, " +
+            "this phone's current speech engine likely doesn't support multiple " +
+            "voices. Try switching the system Text-to-Speech engine to Google's " +
+            "(Settings > Accessibility or Settings > System > Languages > " +
+            "Text-to-speech output) and come back to this screen.",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    OutlinedButton(onClick = {
+        try {
+            context.startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+        } catch (e: Exception) {
+            try {
+                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } catch (e2: Exception) { }
+        }
+    }) {
+        Text("Open Text-to-Speech settings")
     }
 }
 

@@ -84,6 +84,11 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         val text = (overrideText ?: input).trim()
         if (text.isEmpty() || sending) return
 
+        // Stage 15 fix - snapshot the thread's history BEFORE adding this
+        // new user message, so BrainRouter gets everything said so far
+        // without double-counting the message being sent right now.
+        val historySnapshot = messages.toList()
+
         val userMsg = ChatMessage(fromUser = true, text = text)
         messages.add(userMsg)
         ConversationStore.addMessage(context, threadId, userMsg)
@@ -95,7 +100,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             // memory/reminder commands, then fall through to the AI.
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
-            val reply = localReply ?: BrainRouter.sendMessage(context, text, activePersona)
+            val reply = localReply ?: BrainRouter.sendMessage(context, text, activePersona, historySnapshot)
             val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)

@@ -1,65 +1,53 @@
-STAGE 15 (first slice) + carried-forward fixes
-=================================================
+STAGE 15 continued - real conversation memory + widget redesign
+===================================================================
 
-EXTRACTION - same as always: extract straight into your project folder
-(the one with .git already in it), choose overwrite when asked, confirm
-app/src/main/java/com/godavin/vince/OverlayService.kt exists afterward.
+EXTRACTION - same as always: extract straight into your project folder,
+choose overwrite, confirm app/src/main/res/drawable/ic_vince_triangle.xml
+exists afterward (new file - if it's missing, extraction didn't take).
 
-WHAT'S NEW THIS ROUND
-------------------------
-1. FLOATING MIC WIDGET (Stage 15, first working slice)
-   - Home screen now has a "Turn on floating widget" button. First tap
-     asks for the one-time "display over other apps" permission; tap
-     again after granting it to actually start the widget.
-   - A small draggable colored bubble appears on top of whatever app
-     you're in, showing the first letter of the active persona.
-   - TAP it: starts listening immediately (same mic as in-app), routes
-     what you say through the same command pipeline as normal chat,
-     speaks the reply out loud - no need to open VINCE first.
-   - HOLD it (half a second): cycles VINCE -> CLARA -> DAVINA, updates
-     the bubble's color/letter and confirms out loud.
-   - DRAG it: moves anywhere on screen, stays there.
-   - A "VINCE is running" notification stays up while the widget is
-     active - this is an Android requirement for any background service,
-     not something that can be hidden.
-   - NOT YET IN THIS SLICE: camera vision and screen vision from the
-     floating widget - both need a full Activity to request their
-     system permissions, so they're a fast follow-up once this slice is
-     confirmed working. Voice + persona-switch is what's testable now.
-   - Force-closing VINCE removes the widget entirely, as expected.
+WHAT'S FIXED THIS ROUND
+--------------------------
 
-2. VOICE PICKER STILL NOT WORKING - added diagnostics, not a full fix
-   yet since this needs your report. In Settings, under "System checks",
-   there's now a button to jump straight to your phone's Text-to-Speech
-   engine settings. Most likely cause: your phone's current speech
-   engine doesn't expose multiple selectable voices at all (common on
-   some budget-phone default engines) - if so, installing/selecting
-   Google's Text-to-Speech engine as the system default should populate
-   the list. Try this and tell me what the voice list actually shows
-   (empty? one entry? several?) so the next patch can target the real
-   cause instead of guessing again.
+1. REAL CONVERSATION MEMORY (the CLARA screenshot bug)
+   Found the actual cause: every message sent to the AI was completely
+   stateless - only your newest typed message was ever sent, with zero
+   awareness of anything said earlier in that same thread. That's
+   exactly why CLARA forgot what "that answer" meant one message later,
+   and then didn't even recognize its own previous reply (7.65).
+   Fixed: every message now carries the recent conversation (up to the
+   last 20 messages in that thread) along with it, so the AI can
+   actually reason from what was already said - "multiply that by 130"
+   will now correctly resolve to the previous answer, across VINCE,
+   CLARA, and DAVINA alike. This is the flowing-conversation behavior
+   you asked for.
 
-3. REMINDERS STILL ONLY FIRING WHILE APP OPEN - also added diagnostics.
-   Settings > System checks now shows whether battery-optimization
-   exemption is actually granted (it may not be, if you dismissed that
-   prompt) plus a button to open it directly. There's also a button to
-   jump to VINCE's app-details screen, since some phone brands hide a
-   separate "Autostart" toggle there that Android itself has no way to
-   trigger automatically. Check both, and tell me your phone brand/model
-   if reminders still don't fire in the background afterward - that's
-   the fastest way to get you the exact right toggle instead of guessing.
+2. FLOATING WIDGET - REDESIGNED
+   - Circular, medium-sized bubble (was a big square before).
+   - At rest, it now shows the actual VINCE triangle logo (first real
+     version of the locked icon design) instead of a plain colored
+     circle with a letter.
+   - Tap to start a voice command: a colored halo ring appears around
+     the bubble in the active persona's color while it's listening,
+     then disappears once you're done talking.
+   - Hold to switch persona still works the same as before - only the
+     halo's color changes to match, the logo itself stays constant
+     (it's the app's own mark, not persona-specific).
+   - Drag still works the same as before.
+
+3. REMINDERS - PARKED per your call
+   No further reminder patches this round since you've said you won't
+   be using that feature. Nothing removed, it's just not getting more
+   debugging effort until/unless you want to revisit it.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm OverlayService.kt exists after extraction.
-2. Home screen -> tap "Grant display over other apps" -> allow it ->
-   come back, tap "Turn on floating widget".
-3. Open any other app (e.g. your gallery). Confirm the bubble is visible
-   on top of it.
-4. Tap the bubble, say something like "what time is it" - confirm it
-   answers out loud.
-5. Hold the bubble - confirm it says the next persona's name and its
-   color/letter changes.
-6. Drag the bubble somewhere else on screen - confirm it stays put.
-7. Settings -> System checks -> check both statuses/buttons, report
-   back what they show.
+1. Confirm ic_vince_triangle.xml exists under app/src/main/res/drawable/.
+2. Open a chat, ask CLARA (or any persona) a multi-step question like
+   the "45% of 17, now multiply that by 130" example - confirm it
+   actually carries the thread across replies now.
+3. Turn on the floating widget - confirm it's circular, medium-sized,
+   and shows the triangle logo at rest.
+4. Tap it, confirm the halo ring appears in the current persona's color
+   while listening, and disappears after.
+5. Hold it, confirm persona switches and the halo color changes to
+   match on the next tap.

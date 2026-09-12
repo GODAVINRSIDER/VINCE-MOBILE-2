@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    First real asset for the locked "VINCE 2.0" icon design: a nested
+    downward-pointing triangle - an outlined outer triangle in neon blue
+    over a smaller solid triangle in purple, matching the reference look
+    ("glowing blue-to-purple neon triangle V mark, nested triangle
+    outline over a smaller solid triangle"). Used right now as the
+    floating overlay widget's idle look; reused as the real launcher
+    icon at the Dashboard/icon build stage rather than redrawn from
+    scratch.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- outer outlined triangle, neon blue -->
+    <path
+        android:pathData="M12,19.5 L4.2,6 L19.8,6 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#4CE1FF"
+        android:strokeWidth="1.6"
+        android:strokeLineJoin="round" />
+
+    <!-- inner solid triangle, purple -->
+    <path
+        android:pathData="M12,15.6 L7.6,8.6 L16.4,8.6 Z"
+        android:fillColor="#8B5CF6" />
+</vector>

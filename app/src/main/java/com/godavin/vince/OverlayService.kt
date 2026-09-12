@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -19,18 +20,25 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.TextView
+import android.widget.ImageView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * Stage 15 (first slice) - a floating, draggable mic button shown on top
- * of whatever app is currently open, as long as VINCE is running in the
- * background. Requires the one-time "display over other apps" system
- * permission (requested from HomeScreen before this service is started).
+ * Stage 15 - floating overlay widget shown on top of whatever app is
+ * currently open, as long as VINCE is running in the background.
+ * Requires the one-time "display over other apps" system permission
+ * (requested from HomeScreen before this service is started).
+ *
+ * LOOK: at rest, a medium, circular dark bubble showing the VINCE
+ * triangle logo - not a plain colored circle with a letter. While
+ * actively listening for a voice command, a colored halo ring appears
+ * around it in the active persona's color, then disappears once
+ * listening ends.
  *
  * TAP: starts a voice command straight from wherever the user currently
  * is - goes through the exact same local-command-first-then-AI pipeline
@@ -39,7 +47,11 @@ import kotlin.math.abs
  *
  * HOLD (500ms+): cycles the active persona VINCE -> CLARA -> DAVINA,
  * shared with PersonaState so the in-app chat picks up the same choice
- * next time it's opened, and the bubble's color/label update to match.
+ * next time it's opened. The logo itself doesn't change persona-to-
+ * persona (it's the app's own mark) - only the halo color reflects the
+ * active persona.
+ *
+ * DRAG: moves the whole widget anywhere on screen, stays there.
  *
  * The low-priority "VINCE is running" notification is a platform
  * requirement for any foreground service since Android 8 - it can't be
@@ -48,19 +60,23 @@ import kotlin.math.abs
  * NOT YET WIRED IN THIS PATCH: camera vision and screen vision from this
  * floating entry point (both need a full Activity to request their
  * respective system permissions/pickers) - voice + persona-switch is the
- * first working slice; vision-from-overlay is a fast follow-up once this
- * is confirmed working.
+ * first working slice; vision-from-overlay is a fast follow-up.
  */
 class OverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
+    private var haloView: View? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main)
 
     companion object {
         private const val CHANNEL_ID = "vince_overlay"
         private const val NOTIFICATION_ID = 9001
+
+        // Medium, not-too-big sizing (in dp, converted to px at runtime).
+        private const val BUBBLE_DP = 56
+        private const val HALO_DP = 80
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -82,6 +98,8 @@ class OverlayService : Service() {
         }
         speechRecognizer?.destroy()
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun startForegroundWithNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -117,24 +135,45 @@ class OverlayService : Service() {
     private fun showOverlay() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        val activePersona = PersonaState.getActive(applicationContext)
+        val haloSizePx = dp(HALO_DP)
+        val bubbleSizePx = dp(BUBBLE_DP)
 
-        val label = TextView(this).apply {
-            text = activePersona.displayName.take(1)
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            gravity = Gravity.CENTER
+        // Halo ring - transparent center, colored stroke, hidden until a
+        // voice command is actively being listened for.
+        val halo = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(3), personaColorInt(PersonaState.getActive(applicationContext)))
+            }
+            visibility = View.INVISIBLE
+        }
+
+        // The bubble itself - dark circular background with the VINCE
+        // triangle logo centered inside. This is the app's own mark, not
+        // persona-tinted - only the halo reflects the active persona.
+        val logo = ImageView(this).apply {
+            setImageDrawable(ContextCompat.getDrawable(this@OverlayService, R.drawable.ic_vince_triangle))
         }
         val bubble = FrameLayout(this).apply {
-            setBackgroundColor(personaColorInt(activePersona))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.argb(235, 18, 18, 20))
+            }
             addView(
-                label,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
+                logo,
+                FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER)
             )
         }
+
+        // Root container - sized to the halo (the largest element), with
+        // the bubble centered inside it. Dragging/tapping is handled on
+        // the root so the halo and bubble always move/react together.
+        val root = FrameLayout(this).apply {
+            addView(halo, FrameLayout.LayoutParams(haloSizePx, haloSizePx, Gravity.CENTER))
+            addView(bubble, FrameLayout.LayoutParams(bubbleSizePx, bubbleSizePx, Gravity.CENTER))
+        }
+        haloView = halo
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -142,7 +181,7 @@ class OverlayService : Service() {
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
         val params = WindowManager.LayoutParams(
-            150, 150,
+            haloSizePx, haloSizePx,
             overlayType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -160,7 +199,7 @@ class OverlayService : Service() {
         var isDrag = false
         var downTimeMillis = 0L
 
-        bubble.setOnTouchListener { _, event ->
+        root.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = event.rawX
@@ -177,14 +216,14 @@ class OverlayService : Service() {
                     if (abs(dx) > 12 || abs(dy) > 12) isDrag = true
                     params.x = startX + dx
                     params.y = startY + dy
-                    windowManager.updateViewLayout(bubble, params)
+                    windowManager.updateViewLayout(root, params)
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     val heldMillis = System.currentTimeMillis() - downTimeMillis
                     if (!isDrag) {
                         if (heldMillis >= 500) {
-                            cyclePersona(label, bubble)
+                            cyclePersona()
                         } else {
                             startVoiceCommand()
                         }
@@ -195,11 +234,15 @@ class OverlayService : Service() {
             }
         }
 
-        windowManager.addView(bubble, params)
-        overlayView = bubble
+        windowManager.addView(root, params)
+        overlayView = root
     }
 
-    private fun cyclePersona(label: TextView, bubble: FrameLayout) {
+    private fun setHaloColor(persona: Persona) {
+        (haloView?.background as? GradientDrawable)?.setStroke(dp(3), personaColorInt(persona))
+    }
+
+    private fun cyclePersona() {
         val current = PersonaState.getActive(applicationContext)
         val next = when (current) {
             Persona.VINCE -> Persona.CLARA
@@ -207,23 +250,29 @@ class OverlayService : Service() {
             Persona.DAVINA -> Persona.VINCE
         }
         PersonaState.setActive(applicationContext, next)
-        label.text = next.displayName.take(1)
-        bubble.setBackgroundColor(personaColorInt(next))
+        setHaloColor(next)
         VoiceOutput.speak("${next.displayName} here.", next)
     }
 
     private fun startVoiceCommand() {
+        val activePersona = PersonaState.getActive(applicationContext)
+
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             VoiceOutput.speak(
                 "Speech recognition isn't available on this device right now.",
-                PersonaState.getActive(applicationContext)
+                activePersona
             )
             return
         }
+
+        setHaloColor(activePersona)
+        haloView?.visibility = View.VISIBLE
+
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onResults(results: Bundle?) {
+                    haloView?.visibility = View.INVISIBLE
                     val text = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()
@@ -233,8 +282,12 @@ class OverlayService : Service() {
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onError(error: Int) {}
+                override fun onEndOfSpeech() {
+                    haloView?.visibility = View.INVISIBLE
+                }
+                override fun onError(error: Int) {
+                    haloView?.visibility = View.INVISIBLE
+                }
                 override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })

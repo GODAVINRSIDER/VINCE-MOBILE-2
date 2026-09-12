@@ -1,0 +1,67 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Needed to reach the Gemini API directly - standalone brain, no PC involved -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Stage 5 - push-to-talk voice input -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Stage 10 - required for ScreenCaptureService to run as a proper
+         foreground service (Google's documented requirement for
+         MediaProjection, enforced strictly from Android 14+). Harmless
+         on older Android versions where it's simply not needed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Stage 13 - required on Android 13+ to actually show reminder
+         notifications; requested at runtime too, this just declares it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Stage 14 fix - reminders were firing a few minutes late using
+         Android's inexact alarm API; exact alarms need this declared
+         permission on Android 12+ (user grants it via a one-time system
+         settings screen, handled in ReminderScheduler). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Stage 8 - lets the system Camera app write a full-resolution
+             photo somewhere VINCE can read it back, without VINCE needing
+             its own camera permission (the Camera app handles that). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.godavin.vince.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Stage 10 - performs screen capture inside a proper foreground
+             service, per Google's documented MediaProjection requirement. -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- Stage 13 - receives the AlarmManager alarm when a reminder fires. -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
+
+    </application>
+</manifest>

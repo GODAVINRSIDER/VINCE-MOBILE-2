@@ -1,0 +1,51 @@
+STAGE 14 FIXES + STAGE 15 START — what's in this zip
+======================================================
+
+Extract this zip and let it overwrite/merge straight into your
+"VINCE MOBILE 2" project folder (same folder structure, so it drops
+into place - no manual moving between files needed).
+
+Files touched:
+1. app/src/main/AndroidManifest.xml
+   - Added SCHEDULE_EXACT_ALARM permission.
+
+2. app/src/main/java/com/godavin/vince/VoiceOutput.kt
+   - VINCE now uses a real male-labeled device voice if the TTS engine
+     has one; if not, falls back to a lower pitch (0.75) so it still
+     reads as male. CLARA/DAVINA are unchanged.
+
+3. app/src/main/java/com/godavin/vince/ReminderScheduler.kt
+   - Switched from setAndAllowWhileIdle (inexact - this was the actual
+     cause of reminders firing late) to setExactAndAllowWhileIdle.
+   - Requests the Android 12+ "exact alarm" system permission the first
+     time it's needed (opens system settings, one-time grant).
+
+4. app/src/main/java/com/godavin/vince/PersonalTools.kt
+   - Reminders were only ever "in N minutes/hours" before. Added
+     "remind me at 4:30" / "remind me at 4:30 pm" / "set a reminder at
+     4:30 to ..." parsing, resolved against the phone's real Calendar
+     (today if that time hasn't passed yet, else tomorrow).
+   - Wired in the new "open <app name>" command (see AppLauncher.kt).
+   - If exact-alarm permission isn't granted yet, tells the user it
+     opened the settings screen and to ask again after granting it.
+
+5. app/src/main/java/com/godavin/vince/AppLauncher.kt  (NEW FILE)
+   - "open WhatsApp" / "launch MT5" / "start <app>" - matches installed
+     app by exact label first, then partial match, and launches it via
+     Intent. Launch only - no control once the app is open (that's the
+     separate, deferred Accessibility-Service item).
+
+Offline reminders: no change needed - AlarmManager + notification are
+fully local already, so a reminder fires and shows the notification the
+same whether the phone is online or offline at that moment.
+
+TESTING CHECKLIST
+-----------------
+1. Switch to VINCE, send a message, confirm the voice sounds male (or
+   noticeably deeper if this device has no male-labeled TTS voice).
+2. "remind me in 2 minutes" -> should fire right at 2 minutes.
+3. "remind me at [a time a few minutes from now]" -> should fire right
+   at that time.
+4. If Android prompts to allow exact alarms the first time - grant it,
+   then repeat the reminder command once.
+5. "open WhatsApp" (or any installed app) -> should actually open it.

@@ -102,7 +102,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "STAGE 13 - upload + memory + reminders",
+            text = "STAGE 14 - persona switching",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )

@@ -26,8 +26,10 @@ object VoiceOutput {
         }
     }
 
-    fun speak(text: String) {
+    fun speak(text: String, persona: Persona = Persona.VINCE) {
         if (!ready || text.isBlank()) return
+        tts?.setPitch(persona.pitch)
+        tts?.setSpeechRate(persona.rate)
         tts?.speak(stripMarkdownForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
     }
 

@@ -17,16 +17,16 @@ import android.content.Context
  */
 object BrainRouter {
 
-    suspend fun sendMessage(context: Context, userMessage: String): String {
+    suspend fun sendMessage(context: Context, userMessage: String, persona: Persona = Persona.VINCE): String {
         val attempts = mutableListOf<String>()
 
-        // Stage 13 - prepend durable memory (name, saved facts) so it's
-        // present regardless of which chat thread this is, not just
-        // whatever happens to be in this thread's own history. None of
-        // the provider clients have a separate "system role" wired up
-        // yet, so this rides along as part of the message text itself -
-        // simple and works identically across all three providers.
-        val contextBlock = StructuredMemory.buildContextBlock(context)
+        // Stage 13 - durable memory. Stage 14 - persona tone, so the
+        // active persona actually reasons/responds differently, not just
+        // displays a different name and color.
+        val memoryBlock = StructuredMemory.buildContextBlock(context)
+        val contextBlock = listOf(persona.roleDescription, memoryBlock)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
         val fullMessage = if (contextBlock.isBlank()) {
             userMessage
         } else {

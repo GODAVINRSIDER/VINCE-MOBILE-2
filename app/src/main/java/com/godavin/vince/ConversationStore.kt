@@ -8,7 +8,11 @@ import java.io.File
 data class ChatMessage(
     val fromUser: Boolean,
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    // Stage 14 - which persona sent this reply (ignored for user messages).
+    // Defaults to VINCE for backward compatibility with threads saved
+    // before persona switching existed.
+    val persona: String = "VINCE"
 )
 
 data class ChatThread(
@@ -49,7 +53,8 @@ object ConversationStore {
                             ChatMessage(
                                 fromUser = m.getBoolean("fromUser"),
                                 text = m.getString("text"),
-                                timestamp = m.optLong("timestamp", 0L)
+                                timestamp = m.optLong("timestamp", 0L),
+                                persona = m.optString("persona", "VINCE")
                             )
                         )
                     }
@@ -84,6 +89,7 @@ object ConversationStore {
                 mo.put("fromUser", m.fromUser)
                 mo.put("text", m.text)
                 mo.put("timestamp", m.timestamp)
+                mo.put("persona", m.persona)
                 msgArr.put(mo)
             }
             obj.put("messages", msgArr)

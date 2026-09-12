@@ -22,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +60,15 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
+    // Stage 14 - persona switching. Loaded from PersonaState on open so
+    // it's remembered across app restarts/thread switches, not reset to
+    // VINCE every time.
+    var activePersona by remember { mutableStateOf(PersonaState.getActive(context)) }
+
+    fun switchPersona(persona: Persona) {
+        activePersona = persona
+        PersonaState.setActive(context, persona)
+    }
 
     val messages = remember(threadId) {
         mutableStateListOf<ChatMessage>().apply {
@@ -81,13 +91,13 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             // memory/reminder commands, then fall through to the AI.
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
-            val reply = localReply ?: BrainRouter.sendMessage(context, text)
-            val replyMsg = ChatMessage(fromUser = false, text = reply)
+            val reply = localReply ?: BrainRouter.sendMessage(context, text, activePersona)
+            val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
             sending = false
             if (speakReplies) {
-                VoiceOutput.speak(reply)
+                VoiceOutput.speak(reply, activePersona)
             }
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
@@ -166,12 +176,12 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 "Couldn't process the $kind. (${e.message})"
             }
 
-            val replyMsg = ChatMessage(fromUser = false, text = reply)
+            val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
             sending = false
             if (speakReplies) {
-                VoiceOutput.speak(reply)
+                VoiceOutput.speak(reply, activePersona)
             }
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
@@ -335,9 +345,9 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "VINCE",
+                text = activePersona.displayName,
                 fontSize = 20.sp,
-                color = MaterialTheme.colorScheme.primary
+                color = activePersona.color()
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { speakReplies = !speakReplies }) {
@@ -349,6 +359,33 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             }
         }
 
+        // Stage 14 - persona tabs. Tapping one switches which persona
+        // answers next (tone + voice both change) - the in-chat
+        // equivalent of the reference design's tri-persona ring, ahead
+        // of the full visual dashboard pass.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Persona.values().forEach { persona ->
+                val isActive = persona == activePersona
+                OutlinedButton(
+                    onClick = { switchPersona(persona) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = persona.color(),
+                        containerColor = if (isActive) persona.color().copy(alpha = 0.15f) else Color.Transparent
+                    )
+                ) {
+                    Text(persona.displayName)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -358,11 +395,12 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(messages) { msg ->
-                val label = if (msg.fromUser) "You" else "VINCE"
+                val msgPersona = Persona.fromName(msg.persona)
+                val label = if (msg.fromUser) "You" else msgPersona.displayName
                 val color = if (msg.fromUser)
                     MaterialTheme.colorScheme.onSurface
                 else
-                    MaterialTheme.colorScheme.primary
+                    msgPersona.color()
 
                 Column {
                     Text(text = label, fontSize = 12.sp, color = color.copy(alpha = 0.6f))
@@ -373,7 +411,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             if (sending) {
                 item {
                     Text(
-                        text = "VINCE is thinking...",
+                        text = "${activePersona.displayName} is thinking...",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -390,7 +428,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Message VINCE...") },
+                placeholder = { Text("Message ${activePersona.displayName}...") },
                 singleLine = true
             )
             Spacer(modifier = Modifier.height(8.dp))

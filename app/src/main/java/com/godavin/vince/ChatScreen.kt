@@ -24,6 +24,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -402,10 +406,27 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 else
                     msgPersona.color()
 
-                Column {
-                    Text(text = label, fontSize = 12.sp, color = color.copy(alpha = 0.6f))
-                    Text(text = msg.text, color = color)
-                }
+                // Stage 14 fix - persona label now sits beside the message
+                // on the same line (bold, colored) instead of stacked
+                // above it, so a thread stays readable as one flowing
+                // conversation even when personas are switched mid-thread,
+                // rather than each message looking like a separate block.
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(
+                            SpanStyle(
+                                color = color,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        ) {
+                            append("$label: ")
+                        }
+                        withStyle(SpanStyle(color = color)) {
+                            append(msg.text)
+                        }
+                    }
+                )
             }
 
             if (sending) {

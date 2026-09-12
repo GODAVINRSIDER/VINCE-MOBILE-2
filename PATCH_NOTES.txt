@@ -1,51 +1,52 @@
-STAGE 14 FIXES + STAGE 15 START — what's in this zip
-======================================================
+STAGE 14 FIXES (v2) + STAGE 15 START — what's in this zip
+============================================================
 
-Extract this zip and let it overwrite/merge straight into your
-"VINCE MOBILE 2" project folder (same folder structure, so it drops
-into place - no manual moving between files needed).
+IMPORTANT - EXTRACTION (this fixes last time's problem)
+---------------------------------------------------------
+Last zip had a "VINCE MOBILE 2" folder wrapping everything, so
+extracting it into your already-named "VINCE MOBILE 2" folder created a
+duplicate nested subfolder instead of overwriting - which is why nothing
+actually changed. NONE of the previous fixes landed in your real files.
 
-Files touched:
-1. app/src/main/AndroidManifest.xml
-   - Added SCHEDULE_EXACT_ALARM permission.
+This zip's root is "app" directly (no wrapper folder), matching what's
+already inside your project folder. So:
 
-2. app/src/main/java/com/godavin/vince/VoiceOutput.kt
-   - VINCE now uses a real male-labeled device voice if the TTS engine
-     has one; if not, falls back to a lower pitch (0.75) so it still
-     reads as male. CLARA/DAVINA are unchanged.
+1. Open your project folder ("VINCE MOBILE 2") - the one that already
+   has "app", ".git", ".github" etc. inside it.
+2. Extract this zip's contents STRAIGHT INTO that folder (not into a
+   new folder, not into a copy - the actual one with .git in it).
+3. When Windows/your extractor asks about existing files/folders,
+   choose "Replace the files in the destination" / "Overwrite".
+4. Confirm afterward that app/src/main/java/com/godavin/vince/
+   AppLauncher.kt now exists - if it does, the extraction worked.
 
-3. app/src/main/java/com/godavin/vince/ReminderScheduler.kt
-   - Switched from setAndAllowWhileIdle (inexact - this was the actual
-     cause of reminders firing late) to setExactAndAllowWhileIdle.
-   - Requests the Android 12+ "exact alarm" system permission the first
-     time it's needed (opens system settings, one-time grant).
-
-4. app/src/main/java/com/godavin/vince/PersonalTools.kt
-   - Reminders were only ever "in N minutes/hours" before. Added
-     "remind me at 4:30" / "remind me at 4:30 pm" / "set a reminder at
-     4:30 to ..." parsing, resolved against the phone's real Calendar
-     (today if that time hasn't passed yet, else tomorrow).
-   - Wired in the new "open <app name>" command (see AppLauncher.kt).
-   - If exact-alarm permission isn't granted yet, tells the user it
-     opened the settings screen and to ask again after granting it.
-
-5. app/src/main/java/com/godavin/vince/AppLauncher.kt  (NEW FILE)
-   - "open WhatsApp" / "launch MT5" / "start <app>" - matches installed
-     app by exact label first, then partial match, and launches it via
-     Intent. Launch only - no control once the app is open (that's the
-     separate, deferred Accessibility-Service item).
-
-Offline reminders: no change needed - AlarmManager + notification are
-fully local already, so a reminder fires and shows the notification the
-same whether the phone is online or offline at that moment.
+Files touched (5 modified, 1 new):
+1. app/src/main/AndroidManifest.xml - added SCHEDULE_EXACT_ALARM permission.
+2. app/src/main/java/com/godavin/vince/VoiceOutput.kt - VINCE tries a real
+   male device voice first, falls back to lower pitch (0.75) if none exists.
+3. app/src/main/java/com/godavin/vince/ReminderScheduler.kt - switched
+   setAndAllowWhileIdle (inexact - the actual cause of lateness) to
+   setExactAndAllowWhileIdle, with the Android 12+ permission redirect.
+4. app/src/main/java/com/godavin/vince/PersonalTools.kt - added
+   "remind me at 4:30[am/pm]" absolute-time parsing alongside the
+   existing "in N minutes" relative parsing; wired in "open <app>".
+5. app/src/main/java/com/godavin/vince/AppLauncher.kt (NEW) - opens
+   other installed apps by name via Intent.
+6. app/src/main/java/com/godavin/vince/ChatScreen.kt - persona name now
+   sits beside the message on the same line (bold, colored), e.g.
+   "VINCE: Market's ranging on the 15m." - instead of a separate label
+   line stacked above each bubble, so a thread with mixed personas reads
+   as one flowing conversation instead of looking chopped up.
 
 TESTING CHECKLIST
------------------
-1. Switch to VINCE, send a message, confirm the voice sounds male (or
-   noticeably deeper if this device has no male-labeled TTS voice).
-2. "remind me in 2 minutes" -> should fire right at 2 minutes.
-3. "remind me at [a time a few minutes from now]" -> should fire right
-   at that time.
-4. If Android prompts to allow exact alarms the first time - grant it,
+------------------
+1. Confirm AppLauncher.kt exists in the folder (see step 4 above) -
+   if it's missing, the extraction still didn't take.
+2. Switch to VINCE, send a message - voice should sound male/deeper.
+3. "remind me in 2 minutes" - should fire right at 2 minutes.
+4. "remind me at [a time a few minutes away]" - should fire right on time.
+5. First reminder attempt may prompt "allow exact alarms" - grant it,
    then repeat the reminder command once.
-5. "open WhatsApp" (or any installed app) -> should actually open it.
+6. "open WhatsApp" (or any installed app) - should actually open it.
+7. Send a message on VINCE, switch to CLARA, send another - each bubble
+   should show its persona name beside the text, same line.

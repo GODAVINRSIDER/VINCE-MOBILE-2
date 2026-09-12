@@ -65,17 +65,42 @@ fun ChatListScreen(onOpenThread: (String) -> Unit, onBack: () -> Unit) {
             ) {
                 items(threads.value) { thread ->
                     val lastMessage = thread.messages.lastOrNull()?.text?.take(60) ?: ""
+                    // Stage 14 fix - show which persona last replied in this
+                    // thread beside the title, so the list doesn't look
+                    // "mixed up" when different threads used different
+                    // personas.
+                    val lastAiPersona = thread.messages
+                        .lastOrNull { !it.fromUser }
+                        ?.persona
+                        ?.let { Persona.fromName(it) }
+
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpenThread(thread.id) }
                             .padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
-                        Text(
-                            text = thread.title,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 15.sp
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = thread.title,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 15.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (lastAiPersona != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = lastAiPersona.displayName,
+                                    color = lastAiPersona.color(),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                         if (lastMessage.isNotBlank()) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(

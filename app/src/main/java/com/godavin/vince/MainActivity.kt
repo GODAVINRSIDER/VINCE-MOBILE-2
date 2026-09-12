@@ -1,13 +1,21 @@
 package com.godavin.vince
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +52,26 @@ class MainActivity : ComponentActivity() {
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        // Stage 14 fix - reminders were only ever firing while the app was
+        // open/foreground. Root cause: most Android phones (especially
+        // Tecno/Infinix/Itel/Xiaomi-family skins, common in Kenya) kill an
+        // app's background processes aggressively unless it's explicitly
+        // whitelisted from battery optimization - which silently prevents
+        // the AlarmManager broadcast from ever reaching ReminderReceiver.
+        // This asks, once, for that whitelist exemption.
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Some OEM skins block this intent outright - nothing more
+                // to do here besides the manual-settings note in Settings.
             }
         }
 
@@ -95,7 +123,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "VINCE 2.0",
+            text = "GODAVINRSIDER",
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -215,5 +243,83 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(12.dp))
             Text("Saved.", color = MaterialTheme.colorScheme.primary)
         }
+
+        Spacer(modifier = Modifier.height(32.dp))
+        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        VinceVoiceSection()
     }
 }
+
+/**
+ * Stage 14 fix - VINCE voice. Automatic "find a male-labeled voice" name
+ * matching doesn't work reliably (most engines, including Google's own,
+ * don't label voices with the word "male" at all), so instead this lists
+ * every voice this phone's TTS engine actually has, lets Vincent preview
+ * each one out loud, and saves whichever one he picks for VINCE. One-time
+ * setup per device, guaranteed correct instead of guessed.
+ */
+@Composable
+fun VinceVoiceSection() {
+    val voices = remember { VoiceOutput.availableVoiceNames() }
+    var selected by remember { mutableStateOf(VoiceOutput.getVinceVoiceOverride()) }
+
+    Text(
+        text = "VINCE voice",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        text = "Tap a voice to hear it, then tap \"Use\" to set it as VINCE's voice. " +
+            "Until you pick one, VINCE uses a lower-pitched default voice.",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+
+    if (voices.isEmpty()) {
+        Text(
+            "No voices found yet - open this screen again once the speech " +
+                "engine has finished loading.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+        )
+    } else {
+        Column(modifier = Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+            voices.forEach { voiceName ->
+                val isSelected = voiceName == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = voiceName,
+                        fontSize = 13.sp,
+                        color = if (isSelected)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { VoiceOutput.previewVoice(voiceName) }
+                    )
+                    if (isSelected) {
+                        Text("In use", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        TextButton(onClick = {
+                            VoiceOutput.setVinceVoiceOverride(voiceName)
+                            selected = voiceName
+                        }) {
+                            Text("Use", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }

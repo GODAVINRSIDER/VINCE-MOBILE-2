@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -377,10 +379,9 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             }
         }
 
-        // Stage 14 - persona tabs. Tapping one switches which persona
-        // answers next (tone + voice both change) - the in-chat
-        // equivalent of the reference design's tri-persona ring, ahead
-        // of the full visual dashboard pass.
+        // Stage 15 fix - persona tabs redesigned as bordered glowing boxes
+        // with an icon above the label (brain/heart/lotus), matching the
+        // reference chat layout, instead of plain outlined pill buttons.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -390,14 +391,28 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         ) {
             Persona.values().forEach { persona ->
                 val isActive = persona == activePersona
-                OutlinedButton(
-                    onClick = { switchPersona(persona) },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = persona.color(),
-                        containerColor = if (isActive) persona.color().copy(alpha = 0.15f) else Color.Transparent
-                    )
+                Column(
+                    modifier = Modifier
+                        .width(92.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(
+                            width = if (isActive) 1.5.dp else 1.dp,
+                            color = persona.color().copy(alpha = if (isActive) 1f else 0.35f),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .background(persona.color().copy(alpha = if (isActive) 0.16f else 0.04f))
+                        .clickable { switchPersona(persona) }
+                        .padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(persona.displayName)
+                    Image(
+                        painter = painterResource(id = personaIconRes(persona)),
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(persona.color()),
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(persona.displayName, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = persona.color())
                 }
             }
         }
@@ -410,37 +425,54 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(messages) { msg ->
                 val msgPersona = Persona.fromName(msg.persona)
-                val label = if (msg.fromUser) "You" else msgPersona.displayName
-                val color = if (msg.fromUser)
-                    MaterialTheme.colorScheme.onSurface
-                else
-                    msgPersona.color()
+                val color = if (msg.fromUser) MaterialTheme.colorScheme.onSurface else msgPersona.color()
+                val timeLabel = remember(msg.timestamp) {
+                    java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp))
+                }
 
-                // Stage 14 fix - persona label now sits beside the message
-                // on the same line (bold, colored) instead of stacked
-                // above it, so a thread stays readable as one flowing
-                // conversation even when personas are switched mid-thread,
-                // rather than each message looking like a separate block.
-                Text(
-                    text = buildAnnotatedString {
-                        withStyle(
-                            SpanStyle(
-                                color = color,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                        ) {
-                            append("$label: ")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0D0D0F))
+                        .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                        .padding(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!msg.fromUser) {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(color.copy(alpha = 0.15f))
+                                    .border(1.dp, color.copy(alpha = 0.5f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    painter = painterResource(id = personaIconRes(msgPersona)),
+                                    contentDescription = null,
+                                    colorFilter = ColorFilter.tint(color),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
                         }
-                        withStyle(SpanStyle(color = color)) {
-                            append(msg.text)
-                        }
+                        Text(
+                            if (msg.fromUser) "You" else msgPersona.displayName,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = color
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(timeLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                     }
-                )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(msg.text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
+                }
             }
 
             if (sending) {
@@ -454,19 +486,52 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             }
         }
 
-        // Stage 13 - button row is now horizontally scrollable, not just
-        // evenly-spaced, so it can safely hold more buttons in the future
-        // (this stage added Upload) without ever cramping or breaking on
-        // a narrow screen again.
+        // Stage 15 - quick-action suggestion chips, same spirit as the
+        // reference layout's conversation-starter pills. Tapping one
+        // sends that exact phrase through the normal send() pipeline -
+        // shortcuts, not decoration.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SuggestionChip("Check the weather") { send(overrideText = "What's the weather like right now?") }
+            SuggestionChip("Search the web") { input = "Search the web for " }
+            SuggestionChip("Open an app") { input = "Open " }
+            SuggestionChip("Help with something") { send(overrideText = "What can you help me with?") }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+
+        // Stage 15 fix - input redesigned to a rounded pill field with a
+        // circular arrow send button, matching the reference layout,
+        // instead of a plain text field + text "Send" button.
         Column(modifier = Modifier.padding(16.dp)) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Message ${activePersona.displayName}...") },
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Message ${activePersona.displayName}...") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(28.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (sending) activePersona.color().copy(alpha = 0.4f) else activePersona.color())
+                        .clickable(enabled = !sending) { send() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("\u2192", fontSize = 22.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -474,42 +539,61 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ChatActionIcon(R.drawable.ic_action_mic, activePersona.color(), enabled = !sending) { onMicTapped() }
-                ChatActionIcon(R.drawable.ic_action_camera, activePersona.color(), enabled = !sending) { onCameraTapped() }
-                ChatActionIcon(R.drawable.ic_action_screen, activePersona.color(), enabled = !sending) { onScreenTapped() }
-                ChatActionIcon(R.drawable.ic_action_image, activePersona.color(), enabled = !sending) { onUploadTapped() }
-                Button(onClick = { send() }, enabled = !sending) {
-                    Text("Send")
-                }
+                ChatActionButton(R.drawable.ic_action_mic, "Voice", activePersona.color(), enabled = !sending) { onMicTapped() }
+                ChatActionButton(R.drawable.ic_action_camera, "Camera", activePersona.color(), enabled = !sending) { onCameraTapped() }
+                ChatActionButton(R.drawable.ic_action_screen, "Screen", activePersona.color(), enabled = !sending) { onScreenTapped() }
+                ChatActionButton(R.drawable.ic_action_image, "Files", activePersona.color(), enabled = !sending) { onUploadTapped() }
             }
         }
     }
 }
 
-/**
- * Stage 15 fix - the action row was four default OutlinedButtons with
- * plain system emoji glyphs (mic/camera/monitor/picture), which read as
- * generic and inconsistent (each emoji rendered in its own baked-in
- * colors, nothing matching the app). These are custom single-color line
- * icons (ic_action_*.xml) tinted to the active persona's color and set
- * inside a branded circular button instead - same visual language as
- * the floating widget and the wedge ring.
- */
+/** Maps a persona to its icon (brain/heart/lotus) - shared by the
+ * persona tabs and each message's avatar. */
+private fun personaIconRes(persona: Persona): Int = when (persona) {
+    Persona.VINCE -> R.drawable.ic_persona_vince
+    Persona.CLARA -> R.drawable.ic_persona_clara
+    Persona.DAVINA -> R.drawable.ic_persona_davina
+}
+
 @Composable
-private fun ChatActionIcon(iconRes: Int, tint: Color, enabled: Boolean, onClick: () -> Unit) {
+private fun SuggestionChip(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(tint.copy(alpha = if (enabled) 0.18f else 0.06f))
-            .clickable(enabled = enabled) { onClick() },
-        contentAlignment = Alignment.Center
+            .clip(RoundedCornerShape(20.dp))
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/**
+ * Stage 15 fix (v2) - action buttons now show a label under the icon in
+ * a bordered rounded-rect box, matching the reference layout, instead of
+ * icon-only circles.
+ */
+@Composable
+private fun ChatActionButton(iconRes: Int, label: String, tint: Color, enabled: Boolean, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, tint.copy(alpha = if (enabled) 0.4f else 0.15f), RoundedCornerShape(12.dp))
+            .background(tint.copy(alpha = if (enabled) 0.1f else 0.03f))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Image(
             painter = painterResource(id = iconRes),
             contentDescription = null,
             colorFilter = ColorFilter.tint(if (enabled) tint else tint.copy(alpha = 0.4f)),
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(20.dp)
         )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(label, fontSize = 10.sp, color = if (enabled) tint else tint.copy(alpha = 0.4f))
     }
 }

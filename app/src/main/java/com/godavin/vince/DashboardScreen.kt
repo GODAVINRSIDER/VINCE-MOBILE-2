@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -578,12 +579,26 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
     val radiusPx = with(density) { radiusDp.toPx() }
     val personas = listOf(Persona.VINCE, Persona.CLARA, Persona.DAVINA)
 
+    // Lively motion #2 - a small bright "energy pulse" travels along each
+    // connecting line, hub-to-satellite, looping continuously. Combined
+    // with the curved (not straight) connectors and the radial-gradient
+    // glow on every circle below, this is the "lively, more dimensional"
+    // pass on top of the orbit rotation - real depth cues (glow + colored
+    // shadow + motion) rather than a flat static ring, without needing an
+    // actual 3D engine.
+    val pulseTransition = rememberInfiniteTransition(label = "energy_pulse")
+    val pulseT by pulseTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
+        label = "energy_pulse_t"
+    )
+
     Box(
         modifier = Modifier.size(diameterDp),
         contentAlignment = Alignment.Center
     ) {
-        // Connecting lines from hub to each satellite - drawn first, so
-        // the satellites and hub render on top of them.
+        // Connecting lines - drawn first, so satellites/hub sit on top.
         Canvas(modifier = Modifier.fillMaxSize()) {
             val centerOffset = Offset(this.size.width / 2f, this.size.height / 2f)
             personas.forEach { p ->
@@ -593,11 +608,45 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
                     centerOffset.x + (radiusPx * kotlin.math.cos(angleRad)).toFloat(),
                     centerOffset.y + (radiusPx * kotlin.math.sin(angleRad)).toFloat()
                 )
-                drawLine(
-                    color = p.color().copy(alpha = if (isActive) 0.85f else 0.3f),
-                    start = centerOffset,
-                    end = end,
-                    strokeWidth = if (isActive) 3.dp.toPx() else 1.5.dp.toPx()
+                // Curve the connector outward slightly (perpendicular to
+                // the hub-satellite line) instead of a straight line -
+                // gives the ring real dimensional bow instead of flat spokes.
+                val mid = Offset((centerOffset.x + end.x) / 2f, (centerOffset.y + end.y) / 2f)
+                val perpAngle = angleRad + Math.PI / 2
+                val bow = radiusPx * 0.12f
+                val control = Offset(
+                    mid.x + (bow * kotlin.math.cos(perpAngle)).toFloat(),
+                    mid.y + (bow * kotlin.math.sin(perpAngle)).toFloat()
+                )
+
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(centerOffset.x, centerOffset.y)
+                    quadraticBezierTo(control.x, control.y, end.x, end.y)
+                }
+
+                drawPath(
+                    path = path,
+                    brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = if (isActive) 0.5f else 0.15f),
+                            p.color().copy(alpha = if (isActive) 0.9f else 0.3f)
+                        ),
+                        start = centerOffset,
+                        end = end
+                    ),
+                    style = Stroke(width = if (isActive) 3.dp.toPx() else 1.5.dp.toPx())
+                )
+
+                // Traveling energy pulse along the curve (quadratic Bezier
+                // point at parameter t), brighter on the active connector.
+                val t = pulseT
+                val oneMinusT = 1 - t
+                val pulseX = oneMinusT * oneMinusT * centerOffset.x + 2 * oneMinusT * t * control.x + t * t * end.x
+                val pulseY = oneMinusT * oneMinusT * centerOffset.y + 2 * oneMinusT * t * control.y + t * t * end.y
+                drawCircle(
+                    color = p.color().copy(alpha = if (isActive) 0.9f else 0.35f),
+                    radius = if (isActive) 4.dp.toPx() else 2.5.dp.toPx(),
+                    center = Offset(pulseX, pulseY)
                 )
             }
         }
@@ -617,9 +666,22 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
                         )
                     }
                     .size(satelliteDp * scale)
+                    .shadow(
+                        elevation = if (isActive) 14.dp else 4.dp,
+                        shape = CircleShape,
+                        ambientColor = p.color(),
+                        spotColor = p.color()
+                    )
                     .clip(CircleShape)
                     .background(Color(0xFF0D0D0F))
-                    .background(p.color().copy(alpha = if (isActive) 0.22f else 0.08f))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.radialGradient(
+                            colors = listOf(
+                                p.color().copy(alpha = if (isActive) 0.45f else 0.16f),
+                                p.color().copy(alpha = 0.02f)
+                            )
+                        )
+                    )
                     .clickable { onPersonaTapped(p) },
                 contentAlignment = Alignment.Center
             ) {
@@ -636,8 +698,18 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
         Box(
             modifier = Modifier
                 .size(centerDp)
+                .shadow(elevation = 10.dp, shape = CircleShape, ambientColor = Color(0xFF4CE1FF), spotColor = Color(0xFFFF4FD8))
                 .clip(CircleShape)
                 .background(Color(0xFF0D0D0F))
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF4CE1FF).copy(alpha = 0.25f),
+                            Color(0xFF8B5CF6).copy(alpha = 0.08f),
+                            Color.Transparent
+                        )
+                    )
+                )
                 .clickable { cycleNext() },
             contentAlignment = Alignment.Center
         ) {

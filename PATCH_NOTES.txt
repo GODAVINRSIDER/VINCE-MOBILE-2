@@ -1,61 +1,80 @@
-SWAP TO "CLEANER" STYLE + Security/PIN layer (merged, per your request)
-==========================================================================
+RING MADE LIVELIER + CHAT SCREEN REDESIGN (merged, per your request)
+========================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-SecurityLock.kt exists afterward (new file).
+choose overwrite.
 
-WHAT CHANGED - VISUAL SWAP
-------------------------------
-1. Persona icons - added real icon glyphs instead of plain color dots:
-   VINCE = brain, CLARA = heart, DAVINA = lotus/flower (all custom-drawn,
-   tinted to each persona's color).
+1. RING - MORE LIVELY / DIMENSIONAL
+   Still not a literal 3D render (same honest note as before - that
+   needs a real 3D/game engine, a separate project) but real depth and
+   motion added on top of the orbit rotation from last round:
+   - Connectors are now curved (bowed outward), not straight spokes,
+     with a gradient stroke (white-ish near the hub fading into that
+     persona's color toward the satellite).
+   - A small bright "energy pulse" continuously travels along each
+     connector, hub to satellite, looping - real motion, not static.
+   - Every circle (hub + all 3 satellites) now has a radial-gradient
+     glow (bright center fading to transparent edge) instead of a flat
+     color fill - reads as a glowing orb rather than a flat disc.
+   - Added colored drop shadows behind each circle (glows in the
+     persona's own color) for a real sense of depth - this uses a
+     newer Android rendering feature so the shadow color richness will
+     look best on your phone if it's Android 12+; older phones still
+     get a shadow, just closer to a plain dark one.
 
-2. Dashboard ring rebuilt to the "Cleaner Style" panel you picked: three
-   small persona circles (each showing its icon) connected to a center
-   V hub by thin lines - not the solid wedge-donut from last round.
-   Still has real motion, adapted to the new shape:
-   - Tap the center hub: cycles to the next persona, and the three
-     satellites genuinely rotate position ("orbit") so the active one
-     ends up at the top.
-   - Tap a satellite directly: jumps straight to that persona, same
-     orbit motion.
-   - The active satellite gently pulses so it's always obvious which
-     one is active mid-animation.
-
-3. App icon AND floating widget - both rebuilt to the "App Icon
-   (suggestion)" style: a gradient ring (cyan -> purple -> pink) with
-   the V mark centered inside, instead of the triangle alone. Same
-   artwork used in both places so they match.
-
-WHAT'S NEW - SECURITY/PIN LAYER (merged in, per your ask to move fast)
---------------------------------------------------------------------------
-Settings now has an "App lock (PIN)" section at the bottom:
-- No PIN set = app opens straight in, exactly like before - nothing
-  changes unless you set one.
-- Set a 4-8 digit PIN and it's required once per FRESH app launch
-  (force-close, reboot, task-killed) - not on every screen, not every
-  time you background/foreground the app while it's still running.
-- Stored as a one-way hash only, never the plaintext PIN.
-- Remove it any time from the same Settings section.
-
-Worth having now specifically because VINCE can open other apps,
-run a floating widget, and read your screen - more reason to lock it
-down than when it was just read/answer chat.
+2. CHAT SCREEN - REDESIGNED TO MATCH THE REFERENCE
+   - Persona tabs: now bordered glowing boxes with the brain/heart/lotus
+     icon above the name, instead of plain pill buttons.
+   - Every message now has a proper header: persona icon avatar + name
+     + real timestamp, inside its own bordered card - not a plain
+     inline "Name: text" line.
+   - Added 4 quick-action suggestion chips above the input ("Check the
+     weather," "Search the web," "Open an app," "Help with something") -
+     the weather and help ones send immediately, the search/open ones
+     fill in the input so you can finish typing what to search/open.
+   - Input redesigned to a rounded pill field with a circular arrow send
+     button, replacing the plain text-button "Send."
+   - Voice/Camera/Screen/Files buttons now show a label under each icon
+     in a bordered box, matching the reference, instead of icon-only
+     circles from last round.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm SecurityLock.kt exists after extraction.
-2. Check the app icon and floating widget - both should now show the
-   gradient ring + triangle look, not the plain triangle.
-3. Dashboard - confirm the ring shows three small circles with brain/
-   heart/lotus icons connected to the center by lines.
-4. Tap the center hub a few times - confirm it cycles persona and the
-   satellites visibly rotate position each time.
-5. Tap a satellite directly - confirm it jumps to that persona.
-6. Settings - scroll to "App lock (PIN)", set a PIN, force-close the
-   app, reopen it - confirm it asks for the PIN before showing anything
-   else. Enter it wrong once - confirm it says "Incorrect PIN" and lets
-   you retry. Enter it right - confirms it unlocks into the dashboard.
-7. Go back to Settings, remove the PIN, force-close and reopen - confirm
-   it goes straight in with no lock screen.
+1. Dashboard - watch the ring for a few seconds: confirm you can see
+   small bright dots traveling along the curved connector lines, and
+   that each circle has a soft glow rather than a flat fill.
+2. Open a Chat thread - confirm persona tabs now show icon+name in a
+   bordered glowing box.
+3. Send a message - confirm the reply shows a persona icon avatar, name,
+   and real time next to it, inside a bordered card.
+4. Tap each of the 4 suggestion chips above the input - confirm weather/
+   help send immediately, and search/open fill the text field instead.
+5. Confirm the send button is now a circular arrow, and Voice/Camera/
+   Screen/Files each show a label under their icon.
+
+WHAT'S LEFT ON THE PROJECT (answering your question directly)
+------------------------------------------------------------------
+Once you've confirmed everything in this round and the last two rounds
+(icon, ring, mic, voice thread, security PIN) actually works on your
+phone, here's genuinely everything still open:
+
+1. Confirm-and-fix pass on everything just built - this is the biggest
+   remaining item simply because so much shipped in the last few
+   rounds. Nothing else should get built on top until this is solid.
+2. Live market PRICE fetching - still broken (time/date and the
+   economic calendar both work fine; only price lookups don't). Parked
+   as not urgent, but still open whenever you want it revisited.
+3. VINCE's voice picker in Settings - still hasn't produced a real male
+   voice on your phone; likely your phone's default speech engine
+   doesn't expose multiple voices at all. Open question: did switching
+   to Google's TTS engine (System checks button in Settings) change
+   what shows in the list? If not, the next real option is a paid cloud
+   voice API (ElevenLabs/Google Cloud TTS) - bigger feature, needs
+   internet + likely a cost, your call whether it's worth it.
+4. (Optional, not urgent) Upgrading the command router from keyword-
+   matching (RealTimeTools/PersonalTools) to true AI-driven tool-calling,
+   worth doing eventually as more commands pile up, but not needed now.
+5. Reminders - parked at your request, not on this list unless you want
+   to revisit it.
+
+That's the whole remaining list - nothing else pending.

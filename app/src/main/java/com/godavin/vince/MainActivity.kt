@@ -97,6 +97,17 @@ private sealed class Screen {
 @Composable
 fun RootScreen() {
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Security/PIN layer - unlocked state lives only in this composition,
+    // so it resets on every fresh process launch (force-close, reboot,
+    // task kill) but not on ordinary background/foreground within the
+    // same running process. Apps with no PIN ever set skip this entirely.
+    var unlocked by remember { mutableStateOf(!SecurityLock.isPinSet(context)) }
+
+    if (!unlocked) {
+        PinLockScreen(onUnlocked = { unlocked = true })
+        return
+    }
 
     when (val s = screen) {
         is Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Home })
@@ -220,6 +231,98 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         SystemChecksSection()
+
+        Spacer(modifier = Modifier.height(32.dp))
+        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        SecuritySection()
+    }
+}
+
+/**
+ * Security/PIN layer - optional. No PIN set = no lock screen ever,
+ * exactly like before. Set one and it's required once per fresh app
+ * launch (see RootScreen). Stored as a SHA-256 hash only (SecurityLock.kt).
+ */
+@Composable
+fun SecuritySection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var pinSet by remember { mutableStateOf(SecurityLock.isPinSet(context)) }
+    var newPin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    Text(
+        text = "App lock (PIN)",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        text = if (pinSet)
+            "A PIN is set - required once each time the app is freshly launched."
+        else
+            "No PIN set - the app opens straight in, same as before. Set one below if you want it locked (worth it now that VINCE can open other apps and read your screen).",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+
+    if (pinSet) {
+        Button(onClick = {
+            SecurityLock.clearPin(context)
+            pinSet = false
+            message = "PIN removed."
+        }) {
+            Text("Remove PIN")
+        }
+    } else {
+        OutlinedTextField(
+            value = newPin,
+            onValueChange = { if (it.length <= 8) newPin = it },
+            label = { Text("New PIN (4-8 digits)") },
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+            ),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = confirmPin,
+            onValueChange = { if (it.length <= 8) confirmPin = it },
+            label = { Text("Confirm PIN") },
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+            ),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = {
+            when {
+                newPin.length < 4 -> message = "PIN needs to be at least 4 digits."
+                newPin != confirmPin -> message = "PINs don't match."
+                else -> {
+                    SecurityLock.setPin(context, newPin)
+                    pinSet = true
+                    newPin = ""
+                    confirmPin = ""
+                    message = "PIN set."
+                }
+            }
+        }) {
+            Text("Set PIN")
+        }
+    }
+
+    message?.let {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
     }
 }
 

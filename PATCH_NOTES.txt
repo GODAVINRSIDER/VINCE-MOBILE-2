@@ -1,82 +1,61 @@
-MAJOR VISUAL/UX ROUND - icon, ring animation, mic UX, branded icons, voice thread
-====================================================================================
+SWAP TO "CLEANER" STYLE + Security/PIN layer (merged, per your request)
+==========================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite. Confirm app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-exists afterward (new folder/file).
+choose overwrite. Confirm app/src/main/java/com/godavin/vince/
+SecurityLock.kt exists afterward (new file).
 
-WHAT'S IN THIS ROUND
-------------------------
+WHAT CHANGED - VISUAL SWAP
+------------------------------
+1. Persona icons - added real icon glyphs instead of plain color dots:
+   VINCE = brain, CLARA = heart, DAVINA = lotus/flower (all custom-drawn,
+   tinted to each persona's color).
 
-1. REAL APP LAUNCHER ICON - finally wired in
-   Until now the triangle logo only existed inside the app (widget,
-   dashboard ring) - the actual home-screen app icon was still Android's
-   default. Built a proper adaptive icon (dark tech-gradient background +
-   the triangle mark, safe-zone sized so no launcher shape clips it) and
-   wired it into the manifest. This is what you'll see on your home
-   screen and app drawer after this update.
+2. Dashboard ring rebuilt to the "Cleaner Style" panel you picked: three
+   small persona circles (each showing its icon) connected to a center
+   V hub by thin lines - not the solid wedge-donut from last round.
+   Still has real motion, adapted to the new shape:
+   - Tap the center hub: cycles to the next persona, and the three
+     satellites genuinely rotate position ("orbit") so the active one
+     ends up at the top.
+   - Tap a satellite directly: jumps straight to that persona, same
+     orbit motion.
+   - The active satellite gently pulses so it's always obvious which
+     one is active mid-animation.
 
-2. THE RING - REAL ROTATION, NOT JUST RECOLORING
-   Straight answer on the "3D cinematic" ask: a literal 3D render (like
-   the reference mockup) needs a full 3D/game-engine layer (think OpenGL/
-   a Rive or Lottie animation file) - that's a much bigger build than a
-   Compose screen, and not something to fake. What I built instead is
-   real motion, not a static ring:
-   - A slow ambient outer ring continuously rotates in the background -
-     always some motion, even when you're not touching anything.
-   - Tap the CENTER logo: cycles to the next persona and the whole
-     colored ring actually rotates so that persona's arc animates around
-     to the top - a real "orbit," not an instant recolor.
-   - Tapping a specific third of the ring still jumps straight to that
-     persona, with the same rotation.
-   - A soft glow layer sits behind the sharp ring for a neon look - this
-     only renders on Android 12+ (older phones still get the full
-     rotation/orbit, just without the glow softening - that's an Android
-     platform limit, not a bug).
-   If this still isn't close enough to what you pictured, tell me
-   specifically what's missing and we'll keep iterating on it rather
-   than settle - but a true 3D scene is a different, much larger project
-   than the rest of this app, worth flagging honestly now.
+3. App icon AND floating widget - both rebuilt to the "App Icon
+   (suggestion)" style: a gradient ring (cyan -> purple -> pink) with
+   the V mark centered inside, instead of the triangle alone. Same
+   artwork used in both places so they match.
 
-3. MIC - NO MORE SYSTEM SPEECH POPUP
-   The Home screen mic was launching Android's own floating "Speak now"
-   dialog (Google's built-in UI, not ours) - fixed. It now uses the
-   speech engine directly with zero system UI: tap the mic, a colored
-   halo appears around it (same visual language as the floating widget)
-   while it's listening, then disappears once you're done talking. No
-   popup ever appears.
+WHAT'S NEW - SECURITY/PIN LAYER (merged in, per your ask to move fast)
+--------------------------------------------------------------------------
+Settings now has an "App lock (PIN)" section at the bottom:
+- No PIN set = app opens straight in, exactly like before - nothing
+  changes unless you set one.
+- Set a 4-8 digit PIN and it's required once per FRESH app launch
+  (force-close, reboot, task-killed) - not on every screen, not every
+  time you background/foreground the app while it's still running.
+- Stored as a one-way hash only, never the plaintext PIN.
+- Remove it any time from the same Settings section.
 
-4. CHAT ACTION ICONS - CUSTOM, BRANDED
-   The mic/camera/screen/image row was plain default buttons with system
-   emoji (inconsistent colors, generic). Replaced with custom single-
-   color line icons, each in its own circular button tinted to the
-   active persona's color - consistent with the rest of the app now,
-   not keyboard-style emoji.
-
-5. SEPARATE VOICE CHAT THREAD - SAME MEMORY
-   The Home screen mic now writes into its own dedicated "Voice Chat"
-   thread (visible in your Chats list, separate from typed
-   conversations) - but it uses the exact same memory system as every
-   other thread: the same structured facts, and its own real
-   conversation history gets carried into every follow-up exchange
-   (same fix as the CLARA multi-step bug from before). So voice and text
-   stay as separate conversations, while "remembering" work the same way
-   in both.
+Worth having now specifically because VINCE can open other apps,
+run a floating widget, and read your screen - more reason to lock it
+down than when it was just read/answer chat.
 
 TESTING CHECKLIST
 --------------------
-1. After installing, check the app icon on your home screen/app drawer -
-   should be the triangle mark now, not the default Android icon.
-2. Watch the wedge ring for a few seconds without touching it - the
-   outer ring should be slowly rotating on its own.
-3. Tap the center logo a few times - confirm the ring actually rotates
-   the active persona's arc to the top each time, not just recolors.
-4. Tap the Home mic - confirm NO system popup appears, just a colored
-   halo around the button while listening.
-5. Say something to the Home mic, then say a follow-up that depends on
-   the first (like the "multiply that by 130" test) - confirm it
-   actually remembers within that voice conversation.
-6. Open Chats list - confirm there's now a separate "Voice Chat" thread
-   holding those exchanges.
-7. Open a regular Chat thread - confirm the mic/camera/screen/image
-   buttons now look like custom circular icons, not emoji.
+1. Confirm SecurityLock.kt exists after extraction.
+2. Check the app icon and floating widget - both should now show the
+   gradient ring + triangle look, not the plain triangle.
+3. Dashboard - confirm the ring shows three small circles with brain/
+   heart/lotus icons connected to the center by lines.
+4. Tap the center hub a few times - confirm it cycles persona and the
+   satellites visibly rotate position each time.
+5. Tap a satellite directly - confirm it jumps to that persona.
+6. Settings - scroll to "App lock (PIN)", set a PIN, force-close the
+   app, reopen it - confirm it asks for the PIN before showing anything
+   else. Enter it wrong once - confirm it says "Incorrect PIN" and lets
+   you retry. Enter it right - confirms it unlocks into the dashboard.
+7. Go back to Settings, remove the PIN, force-close and reopen - confirm
+   it goes straight in with no lock screen.

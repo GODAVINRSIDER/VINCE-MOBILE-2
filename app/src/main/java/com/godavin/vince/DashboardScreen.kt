@@ -35,10 +35,12 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -507,38 +509,38 @@ private fun QuickActionTile(label: String, modifier: Modifier = Modifier, onClic
 }
 
 /**
- * The "wedge ring" from the locked reference image - a circle split into
- * three equal arcs (one per persona). Two real (not merely decorative)
- * pieces of motion, since a literal 3D render is out of reach for a
- * Compose UI without pulling in a full 3D/game-engine layer:
+ * The persona ring, rebuilt to the "cleaner" satellite style Vincent
+ * picked from the reference sheet: three small persona circles (each
+ * showing that persona's icon - brain/heart/lotus) connected to a
+ * center V hub by thin lines, instead of a solid wedge-donut. Two real
+ * pieces of motion:
  *
- * - A slow ambient outer ring that continuously rotates - the "rings
- *   circling" cinematic feel, always alive even when nothing's tapped.
- * - Tapping the CENTER logo cycles to the next persona and the whole
- *   colored ring genuinely rotates ("orbits") so that persona's arc
- *   animates around to the top - not just a recolor, an actual rotation.
- *   Tapping a specific third of the ring still jumps straight to that
- *   persona, same motion either way.
+ * - Tap the CENTER hub: cycles to the next persona and the satellites
+ *   genuinely rotate their positions ("orbit") so the active one ends
+ *   up at the top - not a recolor, an actual repositioning.
+ * - Tap a specific satellite directly: jumps straight to that persona,
+ *   same orbit motion.
+ * - The active satellite gently pulses (scale + connecting-line
+ *   brightness) so it's always clear which one is active even mid-orbit.
  *
- * A soft neon glow is layered behind the sharp ring via a blurred copy
- * (Compose's blur() modifier) - this only renders on Android 12+
- * (API 31), since RenderEffect-based blur isn't available below that;
- * older phones still get the full rotation/orbit behavior, just without
- * the glow softening.
+ * Hit-testing is just each satellite's own Compose clickable bounds, not
+ * manual angle math, so it stays accurate through every animation frame.
  */
 @Composable
 private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit) {
-    val diameterDp = 200.dp
-    val strokeDp = 18.dp
+    val diameterDp = 220.dp
+    val radiusDp = 82.dp
+    val satelliteDp = 58.dp
+    val centerDp = 66.dp
 
-    fun baseCenterAngle(p: Persona): Float = when (p) {
-        Persona.VINCE -> -30.5f
-        Persona.CLARA -> 89.5f
-        Persona.DAVINA -> 209.5f
+    fun baseAngle(p: Persona): Float = when (p) {
+        Persona.VINCE -> -90f
+        Persona.CLARA -> 150f
+        Persona.DAVINA -> 30f
     }
 
     fun targetRotation(p: Persona): Float {
-        var r = -90f - baseCenterAngle(p)
+        var r = -90f - baseAngle(p)
         while (r < 0f) r += 360f
         while (r >= 360f) r -= 360f
         return r
@@ -549,12 +551,12 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
         rotation.animateTo(targetRotation(active), animationSpec = tween(700, easing = FastOutSlowInEasing))
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "ambient_ring")
-    val ambientAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(24000, easing = LinearEasing), RepeatMode.Restart),
-        label = "ambient_angle"
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse_scale"
     )
 
     fun cycleNext() {
@@ -566,92 +568,74 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
         onPersonaTapped(next)
     }
 
-    fun androidx.compose.ui.graphics.drawscope.DrawScope.ringContent(strokeMultiplier: Float = 1f) {
-        val strokePx = strokeDp.toPx() * strokeMultiplier
-        val arcSize = androidx.compose.ui.geometry.Size(size.width - strokePx, size.height - strokePx)
-        val topLeft = Offset(strokePx / 2, strokePx / 2)
-
-        rotate(degrees = rotation.value) {
-            fun arcAlpha(p: Persona) = if (p == active) 1f else 0.3f
-            drawArc(
-                color = Persona.VINCE.color().copy(alpha = arcAlpha(Persona.VINCE)),
-                startAngle = -90f, sweepAngle = 119f, useCenter = false,
-                topLeft = topLeft, size = arcSize, style = Stroke(width = strokePx)
-            )
-            drawArc(
-                color = Persona.CLARA.color().copy(alpha = arcAlpha(Persona.CLARA)),
-                startAngle = 30f, sweepAngle = 119f, useCenter = false,
-                topLeft = topLeft, size = arcSize, style = Stroke(width = strokePx)
-            )
-            drawArc(
-                color = Persona.DAVINA.color().copy(alpha = arcAlpha(Persona.DAVINA)),
-                startAngle = 150f, sweepAngle = 119f, useCenter = false,
-                topLeft = topLeft, size = arcSize, style = Stroke(width = strokePx)
-            )
-        }
+    fun iconFor(p: Persona): Int = when (p) {
+        Persona.VINCE -> R.drawable.ic_persona_vince
+        Persona.CLARA -> R.drawable.ic_persona_clara
+        Persona.DAVINA -> R.drawable.ic_persona_davina
     }
 
+    val density = LocalDensity.current
+    val radiusPx = with(density) { radiusDp.toPx() }
+    val personas = listOf(Persona.VINCE, Persona.CLARA, Persona.DAVINA)
+
     Box(
-        modifier = Modifier.size(diameterDp + 28.dp),
+        modifier = Modifier.size(diameterDp),
         contentAlignment = Alignment.Center
     ) {
-        // Ambient decorative outer ring - continuously rotating, purely
-        // visual, not tap-mapped, faint HUD-style ticks for cinematic motion.
+        // Connecting lines from hub to each satellite - drawn first, so
+        // the satellites and hub render on top of them.
         Canvas(modifier = Modifier.fillMaxSize()) {
-            rotate(degrees = ambientAngle) {
-                val r = size.minDimension / 2f
-                for (i in 0 until 24) {
-                    val tickAngle = Math.toRadians((i * 15).toDouble())
-                    val inner = r - 4.dp.toPx()
-                    val outer = r
-                    val start = Offset(
-                        (size.width / 2 + inner * kotlin.math.cos(tickAngle)).toFloat(),
-                        (size.height / 2 + inner * kotlin.math.sin(tickAngle)).toFloat()
-                    )
-                    val end = Offset(
-                        (size.width / 2 + outer * kotlin.math.cos(tickAngle)).toFloat(),
-                        (size.height / 2 + outer * kotlin.math.sin(tickAngle)).toFloat()
-                    )
-                    drawLine(
-                        color = Color(0xFF2A3B45),
-                        start = start, end = end, strokeWidth = 1.5f
-                    )
-                }
+            val centerOffset = Offset(this.size.width / 2f, this.size.height / 2f)
+            personas.forEach { p ->
+                val isActive = p == active
+                val angleRad = Math.toRadians((baseAngle(p) + rotation.value).toDouble())
+                val end = Offset(
+                    centerOffset.x + (radiusPx * kotlin.math.cos(angleRad)).toFloat(),
+                    centerOffset.y + (radiusPx * kotlin.math.sin(angleRad)).toFloat()
+                )
+                drawLine(
+                    color = p.color().copy(alpha = if (isActive) 0.85f else 0.3f),
+                    start = centerOffset,
+                    end = end,
+                    strokeWidth = if (isActive) 3.dp.toPx() else 1.5.dp.toPx()
+                )
             }
         }
 
-        // Glow layer - blurred duplicate of the ring, API 31+ only.
-        Canvas(
-            modifier = Modifier
-                .size(diameterDp)
-                .blur(18.dp)
-        ) { ringContent(strokeMultiplier = 1.3f) }
-
-        // Sharp ring on top - this is the one that handles taps.
-        Canvas(
-            modifier = Modifier
-                .size(diameterDp)
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        val center = Offset(size.width / 2f, size.height / 2f)
-                        val dx = offset.x - center.x
-                        val dy = offset.y - center.y
-                        var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 90 - rotation.value
-                        while (angle < 0) angle += 360
-                        while (angle >= 360) angle -= 360
-                        val picked = when {
-                            angle < 120 -> Persona.VINCE
-                            angle < 240 -> Persona.CLARA
-                            else -> Persona.DAVINA
-                        }
-                        onPersonaTapped(picked)
+        // Satellites - each one's own clickable, so tap targeting stays
+        // correct through the whole orbit animation automatically.
+        personas.forEach { p ->
+            val isActive = p == active
+            val scale = if (isActive) pulse else 0.85f
+            Box(
+                modifier = Modifier
+                    .offset {
+                        val angleRad = Math.toRadians((baseAngle(p) + rotation.value).toDouble())
+                        androidx.compose.ui.unit.IntOffset(
+                            (radiusPx * kotlin.math.cos(angleRad)).toInt(),
+                            (radiusPx * kotlin.math.sin(angleRad)).toInt()
+                        )
                     }
-                }
-        ) { ringContent() }
+                    .size(satelliteDp * scale)
+                    .clip(CircleShape)
+                    .background(Color(0xFF0D0D0F))
+                    .background(p.color().copy(alpha = if (isActive) 0.22f else 0.08f))
+                    .clickable { onPersonaTapped(p) },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = iconFor(p)),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(p.color().copy(alpha = if (isActive) 1f else 0.55f)),
+                    modifier = Modifier.size(satelliteDp * scale * 0.5f)
+                )
+            }
+        }
 
+        // Center hub - tap to cycle to the next persona.
         Box(
             modifier = Modifier
-                .size(diameterDp - strokeDp * 2 - 16.dp)
+                .size(centerDp)
                 .clip(CircleShape)
                 .background(Color(0xFF0D0D0F))
                 .clickable { cycleNext() },
@@ -660,7 +644,7 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
             Image(
                 painter = painterResource(id = R.drawable.ic_vince_triangle),
                 contentDescription = null,
-                modifier = Modifier.size(min(diameterDp.value, 56f).dp)
+                modifier = Modifier.size(centerDp * 0.55f)
             )
         }
     }

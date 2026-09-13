@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -224,12 +225,6 @@ fun SettingsScreen(onBack: () -> Unit) {
         Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
         Spacer(modifier = Modifier.height(20.dp))
 
-        VinceVoiceSection()
-
-        Spacer(modifier = Modifier.height(32.dp))
-        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-        Spacer(modifier = Modifier.height(20.dp))
-
         SystemChecksSection()
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -237,6 +232,77 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         SecuritySection()
+
+        Spacer(modifier = Modifier.height(32.dp))
+        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        BackupSection()
+    }
+}
+
+/**
+ * Full backup/restore. Exporting hands the bundled JSON file to
+ * Android's own share sheet (any app that can receive a file - email,
+ * Drive, WhatsApp to self, etc). Restoring reads a previously-exported
+ * file back in via the system file picker. See BackupManager.kt for why
+ * this shape was chosen over a built-in email-account integration.
+ */
+@Composable
+fun BackupSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var message by remember { mutableStateOf<String?>(null) }
+
+    val restoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            message = if (BackupManager.restoreFromUri(context, uri)) {
+                "Restored - your chats, memory, and activity from that backup are now on this device."
+            } else {
+                "Couldn't read that file as a VINCE backup."
+            }
+        }
+    }
+
+    Text(
+        text = "Backup & restore",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        text = "Export everything VINCE has stored - every chat thread, every " +
+            "structured memory fact, your activity log - into one file, then send " +
+            "it wherever you like (email to yourself, Drive, WhatsApp). Restore " +
+            "that same file on a new phone or after reinstalling to pick up right " +
+            "where you left off.",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Row {
+        Button(onClick = {
+            val intent = BackupManager.shareBackupIntent(context)
+            context.startActivity(Intent.createChooser(intent, "Share VINCE backup"))
+        }) {
+            Text("Export & share backup")
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    Row {
+        OutlinedButton(onClick = {
+            restoreLauncher.launch(arrayOf("application/json"))
+        }) {
+            Text("Restore from backup file")
+        }
+    }
+
+    message?.let {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -420,73 +486,3 @@ fun SystemChecksSection() {
     }
 }
 
-/**
- * Stage 15 fix - VINCE voice, now a proper dropdown instead of a
- * scrollable tap-list. Selecting an entry previews it immediately AND
- * saves it as VINCE's voice in one action - no separate pitch/rate
- * controls exposed here at all, just "which installed voice should
- * VINCE use."
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun VinceVoiceSection() {
-    val voices = remember { VoiceOutput.availableVoiceNames() }
-    var selected by remember { mutableStateOf(VoiceOutput.getVinceVoiceOverride()) }
-    var expanded by remember { mutableStateOf(false) }
-
-    Text(
-        text = "VINCE voice",
-        fontSize = 18.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary
-    )
-    Spacer(modifier = Modifier.height(6.dp))
-    Text(
-        text = "Pick which installed voice VINCE uses. Selecting one previews it " +
-            "immediately. Until you pick one, VINCE uses a lower-pitched default voice.",
-        fontSize = 12.sp,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-    )
-    Spacer(modifier = Modifier.height(12.dp))
-
-    if (voices.isEmpty()) {
-        Text(
-            "No voices found yet - open this screen again once the speech " +
-                "engine has finished loading.",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-        )
-    } else {
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = it }
-        ) {
-            OutlinedTextField(
-                value = selected ?: "Default (lower-pitched)",
-                onValueChange = { },
-                readOnly = true,
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth(),
-                singleLine = true
-            )
-            ExposedDropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                voices.forEach { voiceName ->
-                    DropdownMenuItem(
-                        text = { Text(voiceName, fontSize = 13.sp) },
-                        onClick = {
-                            VoiceOutput.setVinceVoiceOverride(voiceName)
-                            VoiceOutput.previewVoice(voiceName)
-                            selected = voiceName
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
-    }
-}

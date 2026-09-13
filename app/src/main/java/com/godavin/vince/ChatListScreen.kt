@@ -18,6 +18,32 @@ import java.util.UUID
 fun ChatListScreen(onOpenThread: (String) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val threads = remember { mutableStateOf(ConversationStore.getAllThreads(context)) }
+    // Delete-thread confirmation - holds the thread awaiting a Yes/No
+    // before anything is actually removed, so a stray tap can't wipe a
+    // conversation by accident.
+    var pendingDelete by remember { mutableStateOf<ChatThread?>(null) }
+
+    pendingDelete?.let { thread ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete this chat?") },
+            text = { Text("\"${thread.title}\" will be permanently deleted. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    ConversationStore.deleteThread(context, thread.id)
+                    threads.value = ConversationStore.getAllThreads(context)
+                    pendingDelete = null
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -63,7 +89,7 @@ fun ChatListScreen(onOpenThread: (String) -> Unit, onBack: () -> Unit) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(threads.value) { thread ->
+                items(threads.value, key = { it.id }) { thread ->
                     val lastMessage = thread.messages.lastOrNull()?.text?.take(60) ?: ""
                     // Stage 14 fix - show which persona last replied in this
                     // thread beside the title, so the list doesn't look
@@ -100,6 +126,13 @@ fun ChatListScreen(onOpenThread: (String) -> Unit, onBack: () -> Unit) {
                                     fontWeight = FontWeight.Bold
                                 )
                             }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Delete",
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable { pendingDelete = thread }
+                            )
                         }
                         if (lastMessage.isNotBlank()) {
                             Spacer(modifier = Modifier.height(2.dp))
@@ -116,3 +149,4 @@ fun ChatListScreen(onOpenThread: (String) -> Unit, onBack: () -> Unit) {
         }
     }
 }
+

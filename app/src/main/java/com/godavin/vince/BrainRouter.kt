@@ -28,11 +28,21 @@ object BrainRouter {
     // model then has the actual back-and-forth to reason from, not just
     // the newest line in isolation.
     //
-    // Capped to the last 20 messages so a very long-lived thread doesn't
-    // grow the prompt (and cost/latency) without bound - 20 is generous
-    // for normal back-and-forth while staying well within typical context
-    // limits even alongside the persona + memory blocks.
-    private const val MAX_HISTORY_MESSAGES = 20
+    // Bumped from 20 to 60 per Vincent's ask for it to remember "the
+    // entire chat" - 60 is a real, meaningful increase (most
+    // conversations never get that long), but not literally unbounded:
+    // every message here rides along in the prompt text on EVERY single
+    // API call, so an uncapped history in a very long-lived thread would
+    // keep growing the prompt forever - slower replies, higher API cost,
+    // and eventually hitting the model's actual context-window limit
+    // outright. 60 messages is the practical ceiling for "remembers
+    // basically everything relevant" without any of that. The separate,
+    // real answer to "never lose anything, even years later" is the
+    // Backup/export feature (BackupManager.kt) - that keeps the FULL,
+    // uncapped history forever on-device (and restorable on a new
+    // phone); this cap only governs how much rides along in a single AI
+    // call, not what's actually stored.
+    private const val MAX_HISTORY_MESSAGES = 60
 
     private fun buildTranscript(history: List<ChatMessage>): String {
         if (history.isEmpty()) return ""

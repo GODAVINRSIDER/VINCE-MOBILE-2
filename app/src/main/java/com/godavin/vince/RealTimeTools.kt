@@ -25,10 +25,6 @@ object RealTimeTools {
     private val DATE_TRIGGERS = listOf(
         "what's the date", "whats the date", "what day is it", "today's date", "what is today's date"
     )
-    private val PRICE_TRIGGERS = listOf(
-        "price of", "current price", "market price", "trading at", "how much is",
-        "what's the price", "whats the price", "price is", "worth right now"
-    )
     private val NEWS_TRIGGERS = listOf(
         "high impact", "high-impact", "economic calendar", "upcoming news",
         "upcoming events", "market news", "news calendar", "economic events",
@@ -54,15 +50,12 @@ object RealTimeTools {
             )
         }
 
-        val symbolMatch = MarketTools.matchSymbol(lower)
-        if (symbolMatch != null && PRICE_TRIGGERS.any { lower.contains(it) }) {
-            val (displayName, ticker) = symbolMatch
-            val result = MarketTools.fetchPriceWithFallback(context, displayName, ticker)
-            return result.fold(
-                onSuccess = { price -> "The current price of ${displayName.uppercase()} is $price." },
-                onFailure = { e -> "Couldn't fetch the current price for ${displayName.uppercase()} right now. (${e.message})" }
-            )
-        }
+        // Live market PRICE fetching (Yahoo/Finnhub) was removed per
+        // Vincent's call - it never worked reliably on-device and he'd
+        // rather price questions just fall through to the AI persona
+        // (which will say it can't check live prices) than keep hitting
+        // a broken local fetch. Time/date/economic-calendar above are
+        // unaffected - those always worked fine.
 
         return null
     }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App launcher icon - foreground layer. Same nested-triangle mark as
+     ic_vince_triangle.xml (used on the floating widget and Dashboard
+     ring), redrawn at adaptive-icon scale (108dp canvas, mark kept
+     inside the ~66dp safe zone so no launcher mask ever clips it). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- outer outlined triangle, neon blue -->
+    <path
+        android:pathData="M54,76.1 L30.6,34.5 L77.4,34.5 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#4CE1FF"
+        android:strokeWidth="4.2"
+        android:strokeLineJoin="round" />
+
+    <!-- inner solid triangle, purple -->
+    <path
+        android:pathData="M54,65.18 L40.74,41.26 L67.26,41.26 Z"
+        android:fillColor="#8B5CF6" />
+</vector>

@@ -12,18 +12,25 @@ import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -467,22 +474,42 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(onClick = { onMicTapped() }, enabled = !sending) {
-                    Text("🎤")
-                }
-                OutlinedButton(onClick = { onCameraTapped() }, enabled = !sending) {
-                    Text("📷")
-                }
-                OutlinedButton(onClick = { onScreenTapped() }, enabled = !sending) {
-                    Text("🖥")
-                }
-                OutlinedButton(onClick = { onUploadTapped() }, enabled = !sending) {
-                    Text("🖼")
-                }
+                ChatActionIcon(R.drawable.ic_action_mic, activePersona.color(), enabled = !sending) { onMicTapped() }
+                ChatActionIcon(R.drawable.ic_action_camera, activePersona.color(), enabled = !sending) { onCameraTapped() }
+                ChatActionIcon(R.drawable.ic_action_screen, activePersona.color(), enabled = !sending) { onScreenTapped() }
+                ChatActionIcon(R.drawable.ic_action_image, activePersona.color(), enabled = !sending) { onUploadTapped() }
                 Button(onClick = { send() }, enabled = !sending) {
                     Text("Send")
                 }
             }
         }
+    }
+}
+
+/**
+ * Stage 15 fix - the action row was four default OutlinedButtons with
+ * plain system emoji glyphs (mic/camera/monitor/picture), which read as
+ * generic and inconsistent (each emoji rendered in its own baked-in
+ * colors, nothing matching the app). These are custom single-color line
+ * icons (ic_action_*.xml) tinted to the active persona's color and set
+ * inside a branded circular button instead - same visual language as
+ * the floating widget and the wedge ring.
+ */
+@Composable
+private fun ChatActionIcon(iconRes: Int, tint: Color, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(tint.copy(alpha = if (enabled) 0.18f else 0.06f))
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(id = iconRes),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(if (enabled) tint else tint.copy(alpha = 0.4f)),
+            modifier = Modifier.size(22.dp)
+        )
     }
 }

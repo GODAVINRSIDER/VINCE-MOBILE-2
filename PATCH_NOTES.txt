@@ -1,68 +1,82 @@
-COMBINED PATCH - voice dropdown fix + Dashboard visual pass
-================================================================
-
-Bundled together per your request - one zip, two things landed.
+MAJOR VISUAL/UX ROUND - icon, ring animation, mic UX, branded icons, voice thread
+====================================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-DashboardScreen.kt exists afterward (new file).
+choose overwrite. Confirm app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+exists afterward (new folder/file).
 
-1. VOICE DROPDOWN STYLING - FIXED
-   Was using Compose's plain filled TextField (solid grey box, looked
-   broken). Switched to OutlinedTextField, matching the API key fields
-   above it in Settings.
+WHAT'S IN THIS ROUND
+------------------------
 
-2. DASHBOARD VISUAL PASS (the locked "ONE CORE, THREE MINDS" layout)
-   The Home screen is now the real dashboard from the reference image,
-   not the old plain button list. Built to the same discipline as
-   everything else in this project: every number/status you see is a
-   real read, nothing fabricated to look good.
+1. REAL APP LAUNCHER ICON - finally wired in
+   Until now the triangle logo only existed inside the app (widget,
+   dashboard ring) - the actual home-screen app icon was still Android's
+   default. Built a proper adaptive icon (dark tech-gradient background +
+   the triangle mark, safe-zone sized so no launcher shape clips it) and
+   wired it into the manifest. This is what you'll see on your home
+   screen and app drawer after this update.
 
-   - System overview panel: real CPU load (best-effort - some phones
-     block this at the OS level, shows "N/A" there rather than a fake
-     number), real RAM used %, real battery % (+ charging indicator),
-     real active network (Wi-Fi/Mobile data/Offline). Refreshes every
-     3 seconds automatically.
-   - Wedge ring: a circle split into VINCE/CLARA/DAVINA thirds, the
-     active persona's third lit up bright, the other two dimmed, with
-     the VINCE triangle logo centered. Tap any third to switch persona -
-     same shared state as switching inside a chat or on the floating
-     widget.
-   - Active persona card: shows the real most recent thing that persona
-     actually said across all your chats (or "Ready" if nothing yet).
-   - Activity panel: your real recent actions - sending a message,
-     analyzing a photo/screen, opening another app - each with a real
-     relative time ("3m ago"). "See All" opens the full log.
-   - Memory panel: your real structured-fact count, real chat thread
-     count, real total message count. "See All" opens the actual list
-     of facts VINCE has saved about you (not sample data).
-   - Quick actions: New chat, All chats, Settings, and the floating
-     widget toggle (moved here from the old Home screen).
-   - Bottom row: Chat tile, a working mic button (same voice pipeline as
-     everywhere else - speaks the answer AND shows it as a toast since
-     there's no chat bubble on this screen), and a Status tile showing
-     real online/offline state.
+2. THE RING - REAL ROTATION, NOT JUST RECOLORING
+   Straight answer on the "3D cinematic" ask: a literal 3D render (like
+   the reference mockup) needs a full 3D/game-engine layer (think OpenGL/
+   a Rive or Lottie animation file) - that's a much bigger build than a
+   Compose screen, and not something to fake. What I built instead is
+   real motion, not a static ring:
+   - A slow ambient outer ring continuously rotates in the background -
+     always some motion, even when you're not touching anything.
+   - Tap the CENTER logo: cycles to the next persona and the whole
+     colored ring actually rotates so that persona's arc animates around
+     to the top - a real "orbit," not an instant recolor.
+   - Tapping a specific third of the ring still jumps straight to that
+     persona, with the same rotation.
+   - A soft glow layer sits behind the sharp ring for a neon look - this
+     only renders on Android 12+ (older phones still get the full
+     rotation/orbit, just without the glow softening - that's an Android
+     platform limit, not a bug).
+   If this still isn't close enough to what you pictured, tell me
+   specifically what's missing and we'll keep iterating on it rather
+   than settle - but a true 3D scene is a different, much larger project
+   than the rest of this app, worth flagging honestly now.
 
-   Reminders/PC Control from the original reference image were left out
-   - reminders are parked per your call, and there's no PC in this
-     build at all (by design, since Stage 1). Everything shown instead
-     is a real capability this app actually has.
+3. MIC - NO MORE SYSTEM SPEECH POPUP
+   The Home screen mic was launching Android's own floating "Speak now"
+   dialog (Google's built-in UI, not ours) - fixed. It now uses the
+   speech engine directly with zero system UI: tap the mic, a colored
+   halo appears around it (same visual language as the floating widget)
+   while it's listening, then disappears once you're done talking. No
+   popup ever appears.
+
+4. CHAT ACTION ICONS - CUSTOM, BRANDED
+   The mic/camera/screen/image row was plain default buttons with system
+   emoji (inconsistent colors, generic). Replaced with custom single-
+   color line icons, each in its own circular button tinted to the
+   active persona's color - consistent with the rest of the app now,
+   not keyboard-style emoji.
+
+5. SEPARATE VOICE CHAT THREAD - SAME MEMORY
+   The Home screen mic now writes into its own dedicated "Voice Chat"
+   thread (visible in your Chats list, separate from typed
+   conversations) - but it uses the exact same memory system as every
+   other thread: the same structured facts, and its own real
+   conversation history gets carried into every follow-up exchange
+   (same fix as the CLARA multi-step bug from before). So voice and text
+   stay as separate conversations, while "remembering" work the same way
+   in both.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm DashboardScreen.kt exists after extraction.
-2. Open the app - you should land on the new dashboard layout, not the
-   old plain button screen.
-3. Check System overview shows real-looking numbers that change if you
-   check again a minute later (especially battery/network).
-4. Tap each third of the wedge ring - confirm the active persona switches
-   and the highlighted arc + active persona card update.
-5. Send a message to a persona in Chat, come back to the dashboard -
-   confirm the Active persona card, Activity panel, and Memory counts
-   all reflect it.
-6. Tap "See All" under Activity and under Memory - confirm both show
-   real data, not placeholders.
-7. Tap the mic on the dashboard, say something - confirm it answers
-   (spoken + toast) without needing to open Chat first.
-8. Settings > VINCE voice - confirm the dropdown now looks like an
-   outlined field, same as the API key fields.
+1. After installing, check the app icon on your home screen/app drawer -
+   should be the triangle mark now, not the default Android icon.
+2. Watch the wedge ring for a few seconds without touching it - the
+   outer ring should be slowly rotating on its own.
+3. Tap the center logo a few times - confirm the ring actually rotates
+   the active persona's arc to the top each time, not just recolors.
+4. Tap the Home mic - confirm NO system popup appears, just a colored
+   halo around the button while listening.
+5. Say something to the Home mic, then say a follow-up that depends on
+   the first (like the "multiply that by 130" test) - confirm it
+   actually remembers within that voice conversation.
+6. Open Chats list - confirm there's now a separate "Voice Chat" thread
+   holding those exchanges.
+7. Open a regular Chat thread - confirm the mic/camera/screen/image
+   buttons now look like custom circular icons, not emoji.

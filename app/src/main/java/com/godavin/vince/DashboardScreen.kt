@@ -9,6 +9,13 @@ import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,10 +30,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -48,6 +57,12 @@ import kotlin.math.min
  * be determined (e.g. CPU load on some OEM builds), it shows "N/A"
  * rather than inventing one.
  */
+
+/** Fixed thread id for the Home mic's dedicated voice-only conversation -
+ * kept separate from typed Chat threads (its own scrollback/history),
+ * but sharing the exact same StructuredMemory facts and BrainRouter
+ * pipeline as every other thread, so it "remembers" the same way. */
+private const val VOICE_THREAD_ID = "home_voice_chat"
 
 /** Whether the "display over other apps" permission is granted -
  * required before OverlayService can add its floating view. */
@@ -107,36 +122,73 @@ fun DashboardScreen(
             ?.text
     }
 
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val spoken = result.data
-            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
-        if (!spoken.isNullOrBlank()) {
-            scope.launch {
-                val localReply = RealTimeTools.handleLocalCommand(context, spoken)
-                    ?: PersonalTools.handleLocalCommand(context, spoken)
-                val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona)
-                ActivityLog.addEvent(context, "Quick voice with ${activePersona.displayName}")
-                recentActivity = ActivityLog.getRecent(context, 4)
-                VoiceOutput.speak(reply, activePersona)
-                Toast.makeText(context, reply, Toast.LENGTH_LONG).show()
-            }
+    var isListening by remember { mutableStateOf(false) }
+
+    fun sendVoiceTurn(spokenText: String) {
+        scope.launch {
+            ConversationStore.ensureThread(context, VOICE_THREAD_ID, "Voice Chat")
+            // Snapshot BEFORE adding this turn's user message, same
+            // discipline as typed Chat, so BrainRouter gets real prior
+            // context without double-counting the current message.
+            val historySnapshot = ConversationStore.getThread(context, VOICE_THREAD_ID)?.messages?.toList()
+                ?: emptyList()
+            val userMsg = ChatMessage(fromUser = true, text = spokenText)
+            ConversationStore.addMessage(context, VOICE_THREAD_ID, userMsg)
+
+            val localReply = RealTimeTools.handleLocalCommand(context, spokenText)
+                ?: PersonalTools.handleLocalCommand(context, spokenText)
+            val reply = localReply
+                ?: BrainRouter.sendMessage(context, spokenText, activePersona, historySnapshot)
+
+            val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+            ConversationStore.addMessage(context, VOICE_THREAD_ID, replyMsg)
+
+            ActivityLog.addEvent(context, "Voice chat with ${activePersona.displayName}")
+            recentActivity = ActivityLog.getRecent(context, 4)
+            VoiceOutput.speak(reply, activePersona)
         }
+    }
+
+    // Direct SpeechRecognizer, not the RecognizerIntent activity - this
+    // is what avoids Google's own floating "Speak now" UI popping up;
+    // the halo drawn around the mic button below is VINCE's own
+    // listening indicator instead, matching the floating widget's look.
+    fun startListening() {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
+            Toast.makeText(context, "Speech recognition isn't available on this device.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isListening = true
+        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
+        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onResults(results: android.os.Bundle?) {
+                isListening = false
+                val text = results
+                    ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                if (!text.isNullOrBlank()) sendVoiceTurn(text)
+                recognizer.destroy()
+            }
+            override fun onReadyForSpeech(params: android.os.Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() { isListening = false }
+            override fun onError(error: Int) { isListening = false; recognizer.destroy() }
+            override fun onPartialResults(partialResults: android.os.Bundle?) {}
+            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        })
+        recognizer.startListening(
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            }
+        )
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            speechLauncher.launch(
-                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to ${activePersona.displayName}")
-                }
-            )
-        }
+        if (granted) startListening()
     }
 
     fun onMicTapped() {
@@ -144,12 +196,7 @@ fun DashboardScreen(
             context, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (hasPermission) {
-            speechLauncher.launch(
-                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to ${activePersona.displayName}")
-                }
-            )
+            startListening()
         } else {
             micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
@@ -359,14 +406,37 @@ fun DashboardScreen(
             Spacer(modifier = Modifier.width(10.dp))
 
             Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(activePersona.color())
-                    .clickable { onMicTapped() },
+                modifier = Modifier.size(80.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("\uD83C\uDF99", fontSize = 24.sp)
+                // Halo indicator while actively listening - same visual
+                // language as the floating widget, not a system dialog.
+                if (isListening) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(CircleShape)
+                            .background(Color.Transparent)
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            drawCircle(
+                                color = activePersona.color(),
+                                radius = size.minDimension / 2f - 3.dp.toPx(),
+                                style = Stroke(width = 3.dp.toPx())
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(activePersona.color())
+                        .clickable { onMicTapped() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("\uD83C\uDF99", fontSize = 24.sp)
+                }
             }
 
             Spacer(modifier = Modifier.width(10.dp))
@@ -437,32 +507,137 @@ private fun QuickActionTile(label: String, modifier: Modifier = Modifier, onClic
 
 /**
  * The "wedge ring" from the locked reference image - a circle split into
- * three equal arcs (one per persona), the active one drawn at full
- * brightness and the other two dimmed, with the VINCE triangle logo
- * centered inside. Tapping a third of the ring switches to that persona.
+ * three equal arcs (one per persona). Two real (not merely decorative)
+ * pieces of motion, since a literal 3D render is out of reach for a
+ * Compose UI without pulling in a full 3D/game-engine layer:
+ *
+ * - A slow ambient outer ring that continuously rotates - the "rings
+ *   circling" cinematic feel, always alive even when nothing's tapped.
+ * - Tapping the CENTER logo cycles to the next persona and the whole
+ *   colored ring genuinely rotates ("orbits") so that persona's arc
+ *   animates around to the top - not just a recolor, an actual rotation.
+ *   Tapping a specific third of the ring still jumps straight to that
+ *   persona, same motion either way.
+ *
+ * A soft neon glow is layered behind the sharp ring via a blurred copy
+ * (Compose's blur() modifier) - this only renders on Android 12+
+ * (API 31), since RenderEffect-based blur isn't available below that;
+ * older phones still get the full rotation/orbit behavior, just without
+ * the glow softening.
  */
 @Composable
 private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit) {
     val diameterDp = 200.dp
     val strokeDp = 18.dp
 
+    fun baseCenterAngle(p: Persona): Float = when (p) {
+        Persona.VINCE -> -30.5f
+        Persona.CLARA -> 89.5f
+        Persona.DAVINA -> 209.5f
+    }
+
+    fun targetRotation(p: Persona): Float {
+        var r = -90f - baseCenterAngle(p)
+        while (r < 0f) r += 360f
+        while (r >= 360f) r -= 360f
+        return r
+    }
+
+    val rotation = remember { Animatable(targetRotation(active)) }
+    LaunchedEffect(active) {
+        rotation.animateTo(targetRotation(active), animationSpec = tween(700, easing = FastOutSlowInEasing))
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "ambient_ring")
+    val ambientAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(24000, easing = LinearEasing), RepeatMode.Restart),
+        label = "ambient_angle"
+    )
+
+    fun cycleNext() {
+        val next = when (active) {
+            Persona.VINCE -> Persona.CLARA
+            Persona.CLARA -> Persona.DAVINA
+            Persona.DAVINA -> Persona.VINCE
+        }
+        onPersonaTapped(next)
+    }
+
+    fun androidx.compose.ui.graphics.drawscope.DrawScope.ringContent(strokeMultiplier: Float = 1f) {
+        val strokePx = strokeDp.toPx() * strokeMultiplier
+        val arcSize = androidx.compose.ui.geometry.Size(size.width - strokePx, size.height - strokePx)
+        val topLeft = Offset(strokePx / 2, strokePx / 2)
+
+        rotate(degrees = rotation.value) {
+            fun arcAlpha(p: Persona) = if (p == active) 1f else 0.3f
+            drawArc(
+                color = Persona.VINCE.color().copy(alpha = arcAlpha(Persona.VINCE)),
+                startAngle = -90f, sweepAngle = 119f, useCenter = false,
+                topLeft = topLeft, size = arcSize, style = Stroke(width = strokePx)
+            )
+            drawArc(
+                color = Persona.CLARA.color().copy(alpha = arcAlpha(Persona.CLARA)),
+                startAngle = 30f, sweepAngle = 119f, useCenter = false,
+                topLeft = topLeft, size = arcSize, style = Stroke(width = strokePx)
+            )
+            drawArc(
+                color = Persona.DAVINA.color().copy(alpha = arcAlpha(Persona.DAVINA)),
+                startAngle = 150f, sweepAngle = 119f, useCenter = false,
+                topLeft = topLeft, size = arcSize, style = Stroke(width = strokePx)
+            )
+        }
+    }
+
     Box(
-        modifier = Modifier.size(diameterDp),
+        modifier = Modifier.size(diameterDp + 28.dp),
         contentAlignment = Alignment.Center
     ) {
+        // Ambient decorative outer ring - continuously rotating, purely
+        // visual, not tap-mapped, faint HUD-style ticks for cinematic motion.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            rotate(degrees = ambientAngle) {
+                val r = size.minDimension / 2f
+                for (i in 0 until 24) {
+                    val tickAngle = Math.toRadians((i * 15).toDouble())
+                    val inner = r - 4.dp.toPx()
+                    val outer = r
+                    val start = Offset(
+                        (size.width / 2 + inner * kotlin.math.cos(tickAngle)).toFloat(),
+                        (size.height / 2 + inner * kotlin.math.sin(tickAngle)).toFloat()
+                    )
+                    val end = Offset(
+                        (size.width / 2 + outer * kotlin.math.cos(tickAngle)).toFloat(),
+                        (size.height / 2 + outer * kotlin.math.sin(tickAngle)).toFloat()
+                    )
+                    drawLine(
+                        color = Color(0xFF2A3B45),
+                        start = start, end = end, strokeWidth = 1.5f
+                    )
+                }
+            }
+        }
+
+        // Glow layer - blurred duplicate of the ring, API 31+ only.
         Canvas(
             modifier = Modifier
-                .fillMaxSize()
+                .size(diameterDp)
+                .blur(18.dp)
+        ) { ringContent(strokeMultiplier = 1.3f) }
+
+        // Sharp ring on top - this is the one that handles taps.
+        Canvas(
+            modifier = Modifier
+                .size(diameterDp)
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         val center = Offset(size.width / 2f, size.height / 2f)
                         val dx = offset.x - center.x
                         val dy = offset.y - center.y
-                        // atan2 gives -180..180 from the positive x-axis;
-                        // shift so 0 degrees is "top" (matches how the
-                        // arcs below are drawn starting at -90).
-                        var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 90
-                        if (angle < 0) angle += 360
+                        var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 90 - rotation.value
+                        while (angle < 0) angle += 360
+                        while (angle >= 360) angle -= 360
                         val picked = when {
                             angle < 120 -> Persona.VINCE
                             angle < 240 -> Persona.CLARA
@@ -471,40 +646,14 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
                         onPersonaTapped(picked)
                     }
                 }
-        ) {
-            val strokePx = strokeDp.toPx()
-            val arcSize = androidx.compose.ui.geometry.Size(
-                size.width - strokePx, size.height - strokePx
-            )
-            val topLeft = Offset(strokePx / 2, strokePx / 2)
-
-            fun arcAlpha(p: Persona) = if (p == active) 1f else 0.3f
-
-            drawArc(
-                color = Persona.VINCE.color().copy(alpha = arcAlpha(Persona.VINCE)),
-                startAngle = -90f, sweepAngle = 119f, useCenter = false,
-                topLeft = topLeft, size = arcSize,
-                style = Stroke(width = strokePx)
-            )
-            drawArc(
-                color = Persona.CLARA.color().copy(alpha = arcAlpha(Persona.CLARA)),
-                startAngle = 30f, sweepAngle = 119f, useCenter = false,
-                topLeft = topLeft, size = arcSize,
-                style = Stroke(width = strokePx)
-            )
-            drawArc(
-                color = Persona.DAVINA.color().copy(alpha = arcAlpha(Persona.DAVINA)),
-                startAngle = 150f, sweepAngle = 119f, useCenter = false,
-                topLeft = topLeft, size = arcSize,
-                style = Stroke(width = strokePx)
-            )
-        }
+        ) { ringContent() }
 
         Box(
             modifier = Modifier
                 .size(diameterDp - strokeDp * 2 - 16.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF0D0D0F)),
+                .background(Color(0xFF0D0D0F))
+                .clickable { cycleNext() },
             contentAlignment = Alignment.Center
         ) {
             Image(

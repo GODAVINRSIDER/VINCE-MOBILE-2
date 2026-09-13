@@ -124,6 +124,19 @@ object ConversationStore {
         persist(context)
     }
 
+    /** Ensures a thread exists with a fixed, human-readable title -
+     * used for reserved fixed-id threads (like the Home mic's dedicated
+     * Voice Chat thread) where we want a real title from the start
+     * instead of letting it auto-title from whatever's first said.
+     * No-ops if the thread already exists (never clobbers a real title). */
+    fun ensureThread(context: Context, threadId: String, title: String) {
+        val list = load(context)
+        if (list.none { it.id == threadId }) {
+            list.add(ChatThread(id = threadId, title = title))
+            persist(context)
+        }
+    }
+
     fun deleteThread(context: Context, threadId: String) {
         val list = load(context)
         list.removeAll { it.id == threadId }

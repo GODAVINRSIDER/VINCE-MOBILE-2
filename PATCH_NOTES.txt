@@ -1,60 +1,68 @@
-STAGE 15 COMPLETE - logo fix, voice dropdown, camera/screen from widget
-==========================================================================
+COMBINED PATCH - voice dropdown fix + Dashboard visual pass
+================================================================
+
+Bundled together per your request - one zip, two things landed.
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite, confirm app/src/main/java/com/godavin/vince/
-OverlayCameraActivity.kt exists afterward (new file).
+choose overwrite. Confirm app/src/main/java/com/godavin/vince/
+DashboardScreen.kt exists afterward (new file).
 
-WHAT'S FIXED/ADDED THIS ROUND
---------------------------------
+1. VOICE DROPDOWN STYLING - FIXED
+   Was using Compose's plain filled TextField (solid grey box, looked
+   broken). Switched to OutlinedTextField, matching the API key fields
+   above it in Settings.
 
-1. LOGO SHAPE FIXED
-   Redrew the triangle mark wider and shallower (apex pulled further
-   down, top corners pulled wider) so the outer/inner nested triangles
-   actually read as a "V" shape like the reference image, instead of two
-   plain equilateral triangles. Same file (ic_vince_triangle.xml), same
-   spot on the floating widget.
+2. DASHBOARD VISUAL PASS (the locked "ONE CORE, THREE MINDS" layout)
+   The Home screen is now the real dashboard from the reference image,
+   not the old plain button list. Built to the same discipline as
+   everything else in this project: every number/status you see is a
+   real read, nothing fabricated to look good.
 
-2. VINCE VOICE - NOW A DROPDOWN
-   Settings > VINCE voice is now a single dropdown field instead of the
-   scrollable list. Tap it, pick a voice from the list - it previews out
-   loud AND saves as VINCE's voice in that one tap. No pitch/rate
-   controls shown anywhere - just "which voice."
+   - System overview panel: real CPU load (best-effort - some phones
+     block this at the OS level, shows "N/A" there rather than a fake
+     number), real RAM used %, real battery % (+ charging indicator),
+     real active network (Wi-Fi/Mobile data/Offline). Refreshes every
+     3 seconds automatically.
+   - Wedge ring: a circle split into VINCE/CLARA/DAVINA thirds, the
+     active persona's third lit up bright, the other two dimmed, with
+     the VINCE triangle logo centered. Tap any third to switch persona -
+     same shared state as switching inside a chat or on the floating
+     widget.
+   - Active persona card: shows the real most recent thing that persona
+     actually said across all your chats (or "Ready" if nothing yet).
+   - Activity panel: your real recent actions - sending a message,
+     analyzing a photo/screen, opening another app - each with a real
+     relative time ("3m ago"). "See All" opens the full log.
+   - Memory panel: your real structured-fact count, real chat thread
+     count, real total message count. "See All" opens the actual list
+     of facts VINCE has saved about you (not sample data).
+   - Quick actions: New chat, All chats, Settings, and the floating
+     widget toggle (moved here from the old Home screen).
+   - Bottom row: Chat tile, a working mic button (same voice pipeline as
+     everywhere else - speaks the answer AND shows it as a toast since
+     there's no chat bubble on this screen), and a Status tile showing
+     real online/offline state.
 
-3. CAMERA + SCREEN VISION NOW WORK FROM THE FLOATING WIDGET
-   This completes Stage 15 - the floating widget can now do everything
-   the in-app chat can:
-   - ONE finger, quick tap: voice command (unchanged)
-   - ONE finger, hold half a second: switch persona (unchanged)
-   - TWO fingers, quick tap together: camera vision - opens the camera,
-     analyzes the photo with the same chart-reading prompt as in-app
-     Camera, speaks the answer out loud
-   - TWO fingers, hold together half a second: screen vision - same
-     3-second "switch to what you want read" warning as in-app Screen,
-     then captures and speaks the answer
-   Both are genuinely invisible - no extra screen appears, just the
-   camera app opening (for camera) or the same warning toast (for
-   screen), then VINCE speaks the result and you're right back to
-   whatever you were doing. Two-finger gestures were used specifically
-   so they add zero delay to the everyday single-finger voice tap.
+   Reminders/PC Control from the original reference image were left out
+   - reminders are parked per your call, and there's no PC in this
+     build at all (by design, since Stage 1). Everything shown instead
+     is a real capability this app actually has.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm OverlayCameraActivity.kt and OverlayScreenActivity.kt both
-   exist after extraction.
-2. Look at the floating widget's logo - does it read as a "V" now?
-3. Settings > VINCE voice - confirm it's a dropdown, pick a voice,
-   confirm it previews and saves in one tap.
-4. Turn on the floating widget, single-finger tap it - still triggers
-   voice as before.
-5. Single-finger hold it - still switches persona as before.
-6. Two-finger tap it (both fingers down and up quickly, together) -
-   should open the camera and speak back a chart read on whatever photo
-   you take.
-7. Two-finger hold it (both fingers down, wait half a second, lift) -
-   should show the 3-second warning, then read whatever's on screen.
-
-If the two-finger gestures feel awkward on your phone (some devices
-handle multi-touch on floating overlay windows slightly differently),
-tell me exactly what happened and we'll adjust the gesture mapping
-rather than redesign from scratch.
+1. Confirm DashboardScreen.kt exists after extraction.
+2. Open the app - you should land on the new dashboard layout, not the
+   old plain button screen.
+3. Check System overview shows real-looking numbers that change if you
+   check again a minute later (especially battery/network).
+4. Tap each third of the wedge ring - confirm the active persona switches
+   and the highlighted arc + active persona card update.
+5. Send a message to a persona in Chat, come back to the dashboard -
+   confirm the Active persona card, Activity panel, and Memory counts
+   all reflect it.
+6. Tap "See All" under Activity and under Memory - confirm both show
+   real data, not placeholders.
+7. Tap the mic on the dashboard, say something - confirm it answers
+   (spoken + toast) without needing to open Chat first.
+8. Settings > VINCE voice - confirm the dropdown now looks like an
+   outlined field, same as the API key fields.

@@ -104,6 +104,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
+            ActivityLog.addEvent(context, "Message with ${activePersona.displayName}")
             sending = false
             if (speakReplies) {
                 VoiceOutput.speak(reply, activePersona)
@@ -188,6 +189,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
+            ActivityLog.addEvent(context, "$kind analyzed")
             sending = false
             if (speakReplies) {
                 VoiceOutput.speak(reply, activePersona)

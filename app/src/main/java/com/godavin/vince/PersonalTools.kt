@@ -37,6 +37,7 @@ object PersonalTools {
         if (appName != null) {
             val openedLabel = AppLauncher.openAppByName(context, appName)
             return if (openedLabel != null) {
+                ActivityLog.addEvent(context, "Opened $openedLabel")
                 "Opening $openedLabel."
             } else {
                 "I couldn't find an app called \"$appName\" on this phone."

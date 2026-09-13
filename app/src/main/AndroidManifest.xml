@@ -3,6 +3,10 @@
     <!-- Needed to reach the Gemini API directly - standalone brain, no PC involved -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Dashboard visual pass - reads the real active connection type
+         (Wi-Fi/mobile/none) for the System overview panel. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- Stage 5 - push-to-talk voice input -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 

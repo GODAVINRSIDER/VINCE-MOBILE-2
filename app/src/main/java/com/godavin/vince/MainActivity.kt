@@ -89,6 +89,8 @@ private sealed class Screen {
     object Home : Screen()
     object Settings : Screen()
     object ChatList : Screen()
+    object ActivityFull : Screen()
+    object MemoryFull : Screen()
     data class Chat(val threadId: String) : Screen()
 }
 
@@ -103,102 +105,15 @@ fun RootScreen() {
             onBack = { screen = Screen.Home }
         )
         is Screen.Chat -> ChatScreen(threadId = s.threadId, onBack = { screen = Screen.ChatList })
-        Screen.Home -> HomeScreen(
+        is Screen.ActivityFull -> ActivityLogFullScreen(onBack = { screen = Screen.Home })
+        is Screen.MemoryFull -> MemoryFullScreen(onBack = { screen = Screen.Home })
+        Screen.Home -> DashboardScreen(
             onOpenSettings = { screen = Screen.Settings },
-            onOpenChat = { screen = Screen.ChatList }
+            onOpenChat = { screen = Screen.ChatList },
+            onOpenNewChat = { screen = Screen.Chat(java.util.UUID.randomUUID().toString()) },
+            onOpenActivityFull = { screen = Screen.ActivityFull },
+            onOpenMemoryFull = { screen = Screen.MemoryFull }
         )
-    }
-}
-
-@Composable
-fun HomeScreen(onOpenSettings: () -> Unit, onOpenChat: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val keyIsSet = remember { ApiKeyStore.hasAnyKey(context) }
-    var overlayOn by remember { mutableStateOf(canDrawOverlays(context)) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "GODAVINRSIDER",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "STAGE 15 - floating widget",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Text(
-            text = if (keyIsSet) "At least one API key saved" else "No API keys set yet",
-            color = if (keyIsSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(onClick = onOpenChat) {
-            Text("Chat")
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(onClick = onOpenSettings) {
-            Text("Settings")
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Floating mic widget",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "Tap the bubble to talk from any app - hold it to switch persona.",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = {
-            if (!canDrawOverlays(context)) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            } else if (!overlayOn) {
-                context.startService(Intent(context, OverlayService::class.java))
-                overlayOn = true
-            } else {
-                context.stopService(Intent(context, OverlayService::class.java))
-                overlayOn = false
-            }
-        }) {
-            Text(
-                if (!canDrawOverlays(context)) "Grant \"display over other apps\""
-                else if (overlayOn) "Turn off floating widget"
-                else "Turn on floating widget"
-            )
-        }
-    }
-}
-
-/** Whether the "display over other apps" permission is granted -
- * required before OverlayService can add its floating view. */
-fun canDrawOverlays(context: android.content.Context): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        Settings.canDrawOverlays(context)
-    } else {
-        true
     }
 }
 
@@ -443,14 +358,15 @@ fun VinceVoiceSection() {
             expanded = expanded,
             onExpandedChange = { expanded = it }
         ) {
-            TextField(
+            OutlinedTextField(
                 value = selected ?: "Default (lower-pitched)",
                 onValueChange = { },
                 readOnly = true,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier
                     .menuAnchor()
-                    .fillMaxWidth()
+                    .fillMaxWidth(),
+                singleLine = true
             )
             ExposedDropdownMenu(
                 expanded = expanded,

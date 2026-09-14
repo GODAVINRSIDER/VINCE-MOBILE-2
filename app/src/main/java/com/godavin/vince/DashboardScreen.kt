@@ -467,8 +467,10 @@ fun DashboardScreen(
     }
 }
 
+// Shared with SettingsScreen (MainActivity.kt) for consistent card
+// grouping across the app - not private anymore for that reason.
 @Composable
-private fun PanelCard(content: @Composable ColumnScope.() -> Unit) {
+fun PanelCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()

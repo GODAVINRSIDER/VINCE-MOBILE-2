@@ -139,9 +139,16 @@ fun SettingsScreen(onBack: () -> Unit) {
     var finnhubText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.FINNHUB)) }
     var saved by remember { mutableStateOf(false) }
 
+    // Fix - this screen grew to 4 stacked sections (API keys, System
+    // checks, Security, Backup) without ever adding scroll support, so
+    // anything past the bottom of the viewport was simply clipped -
+    // which is what made the API key fields look empty and produced the
+    // stray line through "Battery optimization" (a border getting cut
+    // off exactly at the screen edge). verticalScroll fixes all of it.
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp)
     ) {
         Text(
@@ -160,93 +167,95 @@ fun SettingsScreen(onBack: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(20.dp))
 
-        Text("Gemini API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        OutlinedTextField(
-            value = geminiText,
-            onValueChange = { geminiText = it; saved = false },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        PanelCard {
+            Text("Gemini API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            OutlinedTextField(
+                value = geminiText,
+                onValueChange = { geminiText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Groq API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        OutlinedTextField(
-            value = groqText,
-            onValueChange = { groqText = it; saved = false },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+            Text("Groq API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            OutlinedTextField(
+                value = groqText,
+                onValueChange = { groqText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-        Text("OpenRouter API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        OutlinedTextField(
-            value = openRouterText,
-            onValueChange = { openRouterText = it; saved = false },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+            Text("OpenRouter API key", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            OutlinedTextField(
+                value = openRouterText,
+                onValueChange = { openRouterText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            "Finnhub API key (optional - crypto/forex price backup)",
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-        )
-        OutlinedTextField(
-            value = finnhubText,
-            onValueChange = { finnhubText = it; saved = false },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
+            Text(
+                "Finnhub API key (optional - crypto/forex price backup)",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            OutlinedTextField(
+                value = finnhubText,
+                onValueChange = { finnhubText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
 
-        Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-        Row {
-            Button(onClick = {
-                ApiKeyStore.saveKey(context, Provider.GEMINI, geminiText)
-                ApiKeyStore.saveKey(context, Provider.GROQ, groqText)
-                ApiKeyStore.saveKey(context, Provider.OPENROUTER, openRouterText)
-                ApiKeyStore.saveKey(context, Provider.FINNHUB, finnhubText)
-                saved = true
-            }) {
-                Text("Save")
+            Row {
+                Button(onClick = {
+                    ApiKeyStore.saveKey(context, Provider.GEMINI, geminiText)
+                    ApiKeyStore.saveKey(context, Provider.GROQ, groqText)
+                    ApiKeyStore.saveKey(context, Provider.OPENROUTER, openRouterText)
+                    ApiKeyStore.saveKey(context, Provider.FINNHUB, finnhubText)
+                    saved = true
+                }) {
+                    Text("Save")
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                OutlinedButton(onClick = onBack) {
+                    Text("Back")
+                }
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            OutlinedButton(onClick = onBack) {
-                Text("Back")
+
+            if (saved) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Saved.", color = MaterialTheme.colorScheme.primary)
             }
         }
 
-        if (saved) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("Saved.", color = MaterialTheme.colorScheme.primary)
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
         Spacer(modifier = Modifier.height(20.dp))
 
-        SystemChecksSection()
+        PanelCard { SystemChecksSection() }
 
-        Spacer(modifier = Modifier.height(32.dp))
-        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
         Spacer(modifier = Modifier.height(20.dp))
 
-        SecuritySection()
+        PanelCard { SecuritySection() }
 
-        Spacer(modifier = Modifier.height(32.dp))
-        Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
         Spacer(modifier = Modifier.height(20.dp))
 
-        BackupSection()
+        PanelCard { BackupSection() }
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
 /**
- * Full backup/restore. Exporting hands the bundled JSON file to
- * Android's own share sheet (any app that can receive a file - email,
- * Drive, WhatsApp to self, etc). Restoring reads a previously-exported
- * file back in via the system file picker. See BackupManager.kt for why
- * this shape was chosen over a built-in email-account integration.
+ * Full backup/restore. "Backup to Google Drive" tries to open Drive
+ * directly with the file ready to upload; if Drive isn't installed, it
+ * falls back to the normal share sheet so it still works either way.
+ * "Restore from Google Drive" opens Android's own file picker, which
+ * already lists Drive (and any other cloud provider you've got) as a
+ * browsable source alongside on-device storage - no separate Drive-
+ * specific code needed there, that's just how the system picker works.
+ * See BackupManager.kt for why this file-based shape was chosen over a
+ * built-in email-account integration.
  */
 @Composable
 fun BackupSection() {
@@ -274,10 +283,9 @@ fun BackupSection() {
     Spacer(modifier = Modifier.height(6.dp))
     Text(
         text = "Export everything VINCE has stored - every chat thread, every " +
-            "structured memory fact, your activity log - into one file, then send " +
-            "it wherever you like (email to yourself, Drive, WhatsApp). Restore " +
-            "that same file on a new phone or after reinstalling to pick up right " +
-            "where you left off.",
+            "structured memory fact, your activity log - into one file you can keep " +
+            "in Google Drive. Restore that same file on a new phone or after " +
+            "reinstalling to pick up right where you left off.",
         fontSize = 12.sp,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     )
@@ -286,9 +294,17 @@ fun BackupSection() {
     Row {
         Button(onClick = {
             val intent = BackupManager.shareBackupIntent(context)
-            context.startActivity(Intent.createChooser(intent, "Share VINCE backup"))
+            // Try Google Drive directly first - falls back to the
+            // regular share sheet if Drive isn't installed, so this
+            // never dead-ends.
+            val driveIntent = Intent(intent).setPackage("com.google.android.apps.docs")
+            try {
+                context.startActivity(driveIntent)
+            } catch (e: Exception) {
+                context.startActivity(Intent.createChooser(intent, "Share VINCE backup"))
+            }
         }) {
-            Text("Export & share backup")
+            Text("Backup to Google Drive")
         }
     }
     Spacer(modifier = Modifier.height(8.dp))
@@ -296,9 +312,16 @@ fun BackupSection() {
         OutlinedButton(onClick = {
             restoreLauncher.launch(arrayOf("application/json"))
         }) {
-            Text("Restore from backup file")
+            Text("Restore from Google Drive")
         }
     }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = "The restore picker lets you browse Drive directly, same as any " +
+            "other file source on your phone.",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    )
 
     message?.let {
         Spacer(modifier = Modifier.height(8.dp))

@@ -1,74 +1,44 @@
-MALE VOICE LOCKED IN + DELETE CHATS + FULL BACKUP/RESTORE + CLEANUP
-========================================================================
+SETTINGS SCREEN FIX + GOOGLE DRIVE BACKUP/RESTORE
+=====================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-BackupManager.kt exists afterward (new file).
+choose overwrite.
 
-1. VINCE VOICE - LOCKED IN, SETTING REMOVED
-   "en-us-x-iom-local" is now hardcoded as VINCE's voice. The dropdown
-   and the whole "VINCE voice" section are gone from Settings - nothing
-   left to configure, it just works now. (If that exact voice somehow
-   isn't installed on this device, it quietly falls back to the same
-   lower-pitch trick as before rather than breaking.)
+WHAT WAS ACTUALLY WRONG
+---------------------------
+Found the real bug behind the screenshot: the Settings screen never had
+scroll support added, even as it grew to 4 stacked sections (API keys,
+System checks, Security, Backup). Once that content got taller than
+your screen, everything past the bottom edge was being clipped - that's
+what made your API keys look empty (they were still saved fine, just
+scrolled out of the visible/reachable area) and what produced that
+stray line through "Battery optimization" (a text field's border
+getting cut off exactly at the screen edge, not an actual strikethrough).
 
-2. DELETE CHAT THREADS
-   Chats list - each thread now has a "Delete" link. Tapping it asks for
-   confirmation first (shows the thread's title, warns it can't be
-   undone) before actually removing anything.
-
-3. FULL BACKUP & RESTORE (Settings > "Backup & restore")
-   - "Export & share backup" bundles EVERY chat thread, EVERY structured
-     memory fact, and the activity log into one file, then opens
-     Android's normal share sheet - send it to your own email, Drive,
-     WhatsApp, wherever you want to keep it safe.
-   - "Restore from backup file" picks that file back up (via the system
-     file picker) and restores everything from it - meant for a fresh
-     install on a new phone, or after reinstalling, so you're not
-     starting over.
-   Why this shape instead of literally "install an email account": a
-   real automatic email integration needs Gmail's OAuth API or a mail
-   server - ongoing infrastructure, API keys, consent screens, ongoing
-   maintenance. This solves the actual problem (don't lose everything
-   on a phone switch) using Android's own share sheet - works with
-   whatever mail app you already have, no new account or cost involved.
-
-4. CONVERSATION MEMORY WINDOW INCREASED (20 -> 60 messages)
-   Important distinction: your FULL chat history was already being
-   stored forever on-device (nothing was ever silently deleted) - the
-   "20 messages" limit only controlled how much of that history got fed
-   into each individual AI reply, to keep replies fast/affordable. That
-   cap is now 60 - a real, meaningful bump. Going fully unbounded isn't
-   actually free to do: every message in that window rides along on
-   EVERY single reply, so no cap at all means every message in a
-   long-running thread gets slower and more expensive to answer over
-   time, and would eventually hit the AI model's own hard context
-   limit. 60 is the practical sweet spot. The backup/restore feature
-   above is the real fix for "never lose anything, even switching
-   phones" - that keeps everything, forever, uncapped.
-
-5. LIVE PRICES + REMINDERS - REMOVED FROM COMMAND HANDLING
-   Per your call to drop both: "remind me..." and price questions
-   ("what's the price of...") no longer get intercepted locally at all -
-   they fall straight through to the AI persona now, which will just
-   answer conversationally (e.g. explain it can't check live prices)
-   instead of hitting a broken local fetch or a reminder that wouldn't
-   fire reliably. Time, date, and the economic calendar are unaffected -
-   those always worked fine.
+FIXES
+--------
+1. Added proper scrolling to the whole Settings screen - every section
+   is reachable now, nothing gets clipped.
+2. Grouped each section into its own dark bordered card (API keys,
+   System checks, App lock, Backup & restore) instead of a long
+   continuous list separated by thin dividers - clearer visual
+   separation, matches the card style already used on the Dashboard.
+3. Backup/restore now has two clearly separate buttons like you asked:
+   - "Backup to Google Drive" tries to open Drive directly with your
+     backup file ready to upload. If Drive isn't installed, it falls
+     back to the normal share sheet so it never dead-ends.
+   - "Restore from Google Drive" opens the file picker, which already
+     lists Drive as a browsable source right alongside your phone's own
+     storage - so you can pick a backup straight out of Drive.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm BackupManager.kt exists after extraction.
-2. Settings - confirm "VINCE voice" section is gone entirely.
-3. Send a VINCE message - confirm it still sounds male (the locked-in
-   voice).
-4. Chats list - tap "Delete" on a thread, confirm the warning dialog,
-   confirm cancel keeps it and confirm actually removes it.
-5. Settings > Backup & restore - tap "Export & share backup", confirm
-   the share sheet opens with a real file attached. Send it to yourself,
-   then (optional, only if you want to test restore) try restoring it
-   back.
-6. Ask "what's the price of gold" - confirm it no longer tries a broken
-   fetch, just answers normally instead.
-7. Ask "remind me in 5 minutes" - confirm it no longer tries to schedule
-   anything, just responds conversationally.
+1. Open Settings - confirm you can scroll all the way down and every
+   section (API keys, System checks, App lock, Backup) is in its own
+   card, fully visible, nothing clipped or overlapping.
+2. Confirm your API keys are still there (not actually lost - just
+   re-enter and Save if they do show blank, to be safe).
+3. Tap "Backup to Google Drive" - confirm Drive opens (or the share
+   sheet, if Drive isn't installed) with a real file ready to save.
+4. Tap "Restore from Google Drive" - confirm the file picker shows
+   Drive as one of the browsable locations.

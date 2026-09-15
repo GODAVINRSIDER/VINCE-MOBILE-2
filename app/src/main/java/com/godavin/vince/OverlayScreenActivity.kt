@@ -56,8 +56,10 @@ class OverlayScreenActivity : ComponentActivity() {
                     try {
                         val baos = ByteArrayOutputStream()
                         bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, baos)
-                        val apiKey = ApiKeyStore.getKey(applicationContext, Provider.GEMINI)
-                        GeminiVision.describeImage(apiKey, baos.toByteArray(), DEFAULT_OVERLAY_VISION_PROMPT)
+                        val geminiKey = ApiKeyStore.getKey(applicationContext, Provider.GEMINI)
+                        val groqKey = ApiKeyStore.getKey(applicationContext, Provider.GROQ)
+                        val openRouterKey = ApiKeyStore.getKey(applicationContext, Provider.OPENROUTER)
+                        VisionRouter.describeImage(geminiKey, groqKey, openRouterKey, baos.toByteArray(), DEFAULT_OVERLAY_VISION_PROMPT)
                             .fold(
                                 onSuccess = { it },
                                 onFailure = { e -> "Couldn't analyze the screen. (${e.message})" }

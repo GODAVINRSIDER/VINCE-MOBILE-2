@@ -45,33 +45,93 @@ object OpenAiCompatibleClient {
                     ))
                 }
 
-                val body = requestJson.toString()
-                    .toRequestBody("application/json".toMediaType())
-
-                val request = Request.Builder()
-                    .url(baseUrl)
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .post(body)
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string().orEmpty()
-
-                    if (!response.isSuccessful) {
-                        return@withContext Result.failure(
-                            Exception("$providerLabel error (${response.code}): ${responseBody.take(200)}")
-                        )
-                    }
-
-                    val reply = parseReply(responseBody)
-                    if (reply != null) {
-                        Result.success(reply)
-                    } else {
-                        Result.failure(Exception("$providerLabel responded with no readable text."))
-                    }
-                }
+                sendRequest(baseUrl, apiKey, requestJson, providerLabel)
             } catch (e: Exception) {
                 Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * Vision fallback chain - same "OpenAI-compatible" request shape as
+     * text, but using the standard multimodal content array (text part +
+     * base64 image_url part) that vision-capable models on Groq and
+     * OpenRouter both accept. This is what lets photo/screen analysis
+     * fall back to Groq/OpenRouter when Gemini's quota is hit, instead
+     * of vision having zero fallback the way it used to.
+     */
+    suspend fun sendMessageWithImage(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        question: String,
+        imageBase64: String,
+        providerLabel: String
+    ): Result<String> {
+        if (apiKey.isBlank()) {
+            return Result.failure(IllegalStateException("No $providerLabel API key saved."))
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val contentArray = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("type", "text")
+                        put("text", question)
+                    })
+                    put(JSONObject().apply {
+                        put("type", "image_url")
+                        put("image_url", JSONObject().put(
+                            "url", "data:image/jpeg;base64,$imageBase64"
+                        ))
+                    })
+                }
+                val requestJson = JSONObject().apply {
+                    put("model", model)
+                    put("messages", JSONArray().put(
+                        JSONObject().apply {
+                            put("role", "user")
+                            put("content", contentArray)
+                        }
+                    ))
+                }
+
+                sendRequest(baseUrl, apiKey, requestJson, providerLabel)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    private fun sendRequest(
+        baseUrl: String,
+        apiKey: String,
+        requestJson: JSONObject,
+        providerLabel: String
+    ): Result<String> {
+        val body = requestJson.toString()
+            .toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url(baseUrl)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                return Result.failure(
+                    Exception("$providerLabel error (${response.code}): ${responseBody.take(200)}")
+                )
+            }
+
+            val reply = parseReply(responseBody)
+            return if (reply != null) {
+                Result.success(reply)
+            } else {
+                Result.failure(Exception("$providerLabel responded with no readable text."))
             }
         }
     }

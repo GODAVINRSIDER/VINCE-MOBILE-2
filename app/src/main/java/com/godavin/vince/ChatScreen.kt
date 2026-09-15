@@ -204,8 +204,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             val reply = try {
                 val baos = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-                val apiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
-                val result = GeminiVision.describeImage(apiKey, baos.toByteArray(), question)
+                val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+                val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
+                val openRouterKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
+                val result = VisionRouter.describeImage(geminiKey, groqKey, openRouterKey, baos.toByteArray(), question)
                 result.fold(
                     onSuccess = { it },
                     onFailure = { e -> "Couldn't analyze the $kind. (${e.message})" }

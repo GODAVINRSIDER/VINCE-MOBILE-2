@@ -1,33 +1,43 @@
-FIX: "OPEN <APP>" COULDN'T FIND ANY APP
-============================================
+VISION FALLBACK CHAIN - PHOTO/SCREEN ANALYSIS NO LONGER DIES WHEN GEMINI QUOTA HITS
+========================================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite.
+choose overwrite. Confirm app/src/main/java/com/godavin/vince/
+VisionRouter.kt exists afterward (new file).
 
-THE REAL CAUSE
-------------------
-Since Android 11, apps can't see other installed apps through the
-system's PackageManager by default - Google calls this "package
-visibility," meant to stop apps from silently fingerprinting everything
-else on your phone. This app targets a recent enough Android version
-that it's been hit by that restriction the whole time AppLauncher
-existed - it wasn't broken logic, it was straight up not allowed to see
-WhatsApp (or anything else) in the first place, so "couldn't find" was
-technically true from the code's point of view.
+WHAT CHANGED
+---------------
+Photo and screen analysis now falls back automatically, same as chat
+already does:
+1. Gemini's vision API (unchanged, still tried first - best quality)
+2. If that fails (quota, timeout, anything) -> Groq's vision model
+3. If that also fails -> OpenRouter's free vision model
 
-THE FIX
------------
-Added a <queries> declaration to the manifest, specifically asking for
-visibility into any app that has a launcher icon (i.e. anything that
-shows up in your app drawer) - narrow, exactly what's needed, nothing
-broader. Also switched AppLauncher.kt to query using that same intent
-directly (queryIntentActivities) instead of the older method, which is
-the reliable, correct pairing for this.
+This applies everywhere vision is used: in-chat Camera/Screen buttons,
+the floating widget's two-finger camera/screen gestures - all three now
+go through the same fallback chain.
+
+No new key needed - this uses the SAME Gemini/Groq/OpenRouter keys
+already in Settings for text chat. If you only have a Gemini key saved,
+behavior is unchanged (no fallback available, same as before). Add a
+Groq and/or OpenRouter key if you haven't already, to actually get the
+benefit of this.
+
+ONE THING TO KNOW
+---------------------
+Groq and OpenRouter's vision models are solid but not identical in
+quality/style to Gemini's - if a photo analysis ever reads a little
+different in phrasing when you've hit Gemini's quota, that's why: it's
+a different model answering, not a bug. The underlying chart-reading
+prompt/instructions are identical either way.
 
 TESTING CHECKLIST
 --------------------
-1. "Open WhatsApp" (typed or spoken, any of the 4 entry points) -
-   confirm it actually opens now.
-2. Try 2-3 other installed apps by name to confirm it's not a one-off.
-3. Try a misspelled/partial name (e.g. "open whats") - confirm it still
-   finds WhatsApp via the partial-match fallback.
+1. Confirm VisionRouter.kt exists after extraction.
+2. With your Gemini key still working, do a normal chart photo analysis
+   - confirm it works exactly as before (Gemini, unchanged).
+3. To actually test the fallback: temporarily clear/break your Gemini
+   key in Settings (or wait until you hit quota again), then try a photo
+   analysis - confirm it still gets a real answer instead of failing,
+   coming from Groq or OpenRouter this time.
+4. Put your real Gemini key back afterward if you cleared it for testing.

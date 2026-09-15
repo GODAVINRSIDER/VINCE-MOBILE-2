@@ -1,58 +1,33 @@
-DISCARD DEEPSEEK + CONCISE RESPONSES + VOICE FIXES
-========================================================
+FIX: "OPEN <APP>" COULDN'T FIND ANY APP
+============================================
 
 EXTRACTION - same as always: extract straight into your project folder,
 choose overwrite.
 
-1. DEEPSEEK - FULLY REMOVED
-   Pulled back out per your call - Settings field, API key slot, and the
-   BrainRouter fallback branch are all gone. Back to Gemini -> Groq ->
-   OpenRouter, same as before any of this started.
+THE REAL CAUSE
+------------------
+Since Android 11, apps can't see other installed apps through the
+system's PackageManager by default - Google calls this "package
+visibility," meant to stop apps from silently fingerprinting everything
+else on your phone. This app targets a recent enough Android version
+that it's been hit by that restriction the whole time AppLauncher
+existed - it wasn't broken logic, it was straight up not allowed to see
+WhatsApp (or anything else) in the first place, so "couldn't find" was
+technically true from the code's point of view.
 
-2. RESPONSES - CONCISE BY DEFAULT, NO MARKDOWN
-   Every persona now gets a standing instruction: keep replies short and
-   to the point by default (key takeaway in a few sentences), then ASK
-   if you want the fuller detail rather than dumping everything at
-   once - your call whether to go deeper. Also told to never use
-   Markdown syntax (no ##, **, tables with | or ---, bullet dashes) -
-   this chat has no Markdown renderer, so those were just showing up as
-   literal symbols cluttering the bubble, exactly like your screenshot.
-   Applies to chat AND chart/photo/screen analysis - that prompt got the
-   same treatment (quick one-line read, then asks if you want the full
-   breakdown instead of front-loading a table every time).
-
-3. TIMEFRAME PRONUNCIATION FIXED (VOICE ONLY)
-   "15m" was being read as "15 metres." Now speech-cleans trading
-   shorthand before speaking: 15m -> "15 minute", 1h -> "1 hour", 1d ->
-   "1 day", 1w -> "1 week". On-screen text is untouched - this only
-   changes what gets spoken.
-
-4. TABLE DASHES NO LONGER READ ALOUD
-   Whole lines that are just a Markdown table separator (a row of
-   dashes/pipes) or a "---" divider now get dropped entirely before
-   speaking, instead of VINCE reading out a string of "dash dash dash."
-   Combined with fix #2 above (AI told not to produce tables in the
-   first place), this should rarely even come up going forward, but
-   it's a safety net either way.
-
-5. IN-CHAT MIC - SAME FIX AS THE WIDGET/HOME MIC
-   Found it: the mic button INSIDE a chat was still launching Google's
-   own floating "Speak now" popup, even after the widget and Home mic
-   were already fixed to skip that. Now uses the same direct-speech
-   approach - no popup, just the mic button's own border/background
-   lighting up and saying "Listening..." while it's picking up your
-   voice.
+THE FIX
+-----------
+Added a <queries> declaration to the manifest, specifically asking for
+visibility into any app that has a launcher icon (i.e. anything that
+shows up in your app drawer) - narrow, exactly what's needed, nothing
+broader. Also switched AppLauncher.kt to query using that same intent
+directly (queryIntentActivities) instead of the older method, which is
+the reliable, correct pairing for this.
 
 TESTING CHECKLIST
 --------------------
-1. Send a message that would normally get a long answer (e.g. ask for a
-   chart-style breakdown) - confirm the reply is short with an offer for
-   more detail, no ##/**/tables visible in the bubble.
-2. Ask something involving a timeframe out loud or have VINCE speak a
-   reply mentioning one (e.g. "the 15m chart") - confirm it says
-   "15 minute", not "15 metres."
-3. Confirm Settings no longer shows a DeepSeek field anywhere.
-4. Tap the mic INSIDE a chat thread - confirm no Google popup appears,
-   just the button itself lighting up while listening.
-5. Do a camera/screen chart analysis - confirm the response is a quick
-   read with an offer for more detail, not a full table dump.
+1. "Open WhatsApp" (typed or spoken, any of the 4 entry points) -
+   confirm it actually opens now.
+2. Try 2-3 other installed apps by name to confirm it's not a one-off.
+3. Try a misspelled/partial name (e.g. "open whats") - confirm it still
+   finds WhatsApp via the partial-match fallback.

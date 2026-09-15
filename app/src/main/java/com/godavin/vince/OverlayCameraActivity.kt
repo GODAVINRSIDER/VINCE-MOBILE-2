@@ -17,15 +17,14 @@ import java.io.File
 // and this needs to behave identically when triggered from the floating
 // widget instead of from inside the app.
 internal const val DEFAULT_OVERLAY_VISION_PROMPT = "You're looking at a trading chart for an " +
-    "experienced price-action/smart-money-concepts trader. Start with ONE quick summary " +
-    "line in this exact style: 'This chart on this [timeframe if visible] is in a " +
-    "[downtrend/uptrend/range]; key level spotted: [FVG/order block/support/resistance/" +
-    "breakout-retest/etc]; roughly [XX-YY]% probability for a [buy/sell] position.' Then, " +
-    "on a new line, give a focused interactive breakdown: the key support/resistance " +
-    "levels or liquidity zones visible, notable structure (order blocks, fair value gaps, " +
-    "trendlines, break of structure), and your honest thoughts on what the chart is " +
-    "suggesting. Be direct and specific like a second pair of eyes on the chart, not a " +
-    "generic disclaimer-heavy description."
+    "experienced price-action/smart-money-concepts trader. Give ONE quick summary line " +
+    "in plain sentence form (no Markdown, no headers, no tables, no bullet dashes): the " +
+    "timeframe if visible, whether it's in a downtrend/uptrend/range, the key level " +
+    "spotted (FVG/order block/support/resistance/breakout-retest/etc), and a rough buy/" +
+    "sell probability. Then ask if the user wants the fuller breakdown (support/" +
+    "resistance zones, structure, your honest read) rather than dumping all of it by " +
+    "default - keep it conversational and skimmable, like a second pair of eyes glancing " +
+    "at the chart, not a formatted report."
 
 /**
  * Stage 15 - camera vision from the floating overlay widget. The system

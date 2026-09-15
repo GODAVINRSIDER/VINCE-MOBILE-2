@@ -54,15 +54,14 @@ import java.io.File
 // to the AI but never shown in the chat bubble itself (see
 // sendBitmapForAnalysis below) - only what Vincent actually typed shows.
 private const val DEFAULT_CHART_PROMPT = "You're looking at a trading chart for an " +
-    "experienced price-action/smart-money-concepts trader. Start with ONE quick summary " +
-    "line in this exact style: 'This chart on this [timeframe if visible] is in a " +
-    "[downtrend/uptrend/range]; key level spotted: [FVG/order block/support/resistance/" +
-    "breakout-retest/etc]; roughly [XX-YY]% probability for a [buy/sell] position.' Then, " +
-    "on a new line, give a focused interactive breakdown: the key support/resistance " +
-    "levels or liquidity zones visible, notable structure (order blocks, fair value gaps, " +
-    "trendlines, break of structure), and your honest thoughts on what the chart is " +
-    "suggesting. Be direct and specific like a second pair of eyes on the chart, not a " +
-    "generic disclaimer-heavy description."
+    "experienced price-action/smart-money-concepts trader. Give ONE quick summary line " +
+    "in plain sentence form (no Markdown, no headers, no tables, no bullet dashes): the " +
+    "timeframe if visible, whether it's in a downtrend/uptrend/range, the key level " +
+    "spotted (FVG/order block/support/resistance/breakout-retest/etc), and a rough buy/" +
+    "sell probability. Then ask if the user wants the fuller breakdown (support/" +
+    "resistance zones, structure, your honest read) rather than dumping all of it by " +
+    "default - keep it conversational and skimmable, like a second pair of eyes glancing " +
+    "at the chart, not a formatted report."
 
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
@@ -124,30 +123,50 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val spoken = result.data
-            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
-        if (!spoken.isNullOrBlank()) {
-            send(overrideText = spoken)
-        }
-    }
+    // Fix - the in-chat mic was still launching Google's own floating
+    // "Speak now" popup (RecognizerIntent as an Activity), unlike the
+    // Home mic and the floating widget's mic, both already fixed to use
+    // SpeechRecognizer directly with zero system UI. Matches that same
+    // treatment here: no popup, just a colored halo around the mic
+    // button (see the action row below) while actively listening.
+    var isListening by remember { mutableStateOf(false) }
 
-    fun launchSpeechRecognition() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to VINCE")
+    fun startListening() {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
+            return
         }
-        speechLauncher.launch(intent)
+        isListening = true
+        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
+        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onResults(results: android.os.Bundle?) {
+                isListening = false
+                val spoken = results
+                    ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                if (!spoken.isNullOrBlank()) send(overrideText = spoken)
+                recognizer.destroy()
+            }
+            override fun onReadyForSpeech(params: android.os.Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() { isListening = false }
+            override fun onError(error: Int) { isListening = false; recognizer.destroy() }
+            override fun onPartialResults(partialResults: android.os.Bundle?) {}
+            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        })
+        recognizer.startListening(
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            }
+        )
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            launchSpeechRecognition()
+            startListening()
         }
     }
 
@@ -157,7 +176,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (hasPermission) {
-            launchSpeechRecognition()
+            startListening()
         } else {
             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -539,7 +558,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ChatActionButton(R.drawable.ic_action_mic, "Voice", activePersona.color(), enabled = !sending) { onMicTapped() }
+                ChatActionButton(R.drawable.ic_action_mic, "Voice", activePersona.color(), enabled = !sending, highlighted = isListening) { onMicTapped() }
                 ChatActionButton(R.drawable.ic_action_camera, "Camera", activePersona.color(), enabled = !sending) { onCameraTapped() }
                 ChatActionButton(R.drawable.ic_action_screen, "Screen", activePersona.color(), enabled = !sending) { onScreenTapped() }
                 ChatActionButton(R.drawable.ic_action_image, "Files", activePersona.color(), enabled = !sending) { onUploadTapped() }
@@ -576,13 +595,24 @@ private fun SuggestionChip(label: String, onClick: () -> Unit) {
  * icon-only circles.
  */
 @Composable
-private fun ChatActionButton(iconRes: Int, label: String, tint: Color, enabled: Boolean, onClick: () -> Unit) {
+private fun ChatActionButton(
+    iconRes: Int,
+    label: String,
+    tint: Color,
+    enabled: Boolean,
+    highlighted: Boolean = false,
+    onClick: () -> Unit
+) {
     Column(
         modifier = Modifier
             .width(64.dp)
             .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, tint.copy(alpha = if (enabled) 0.4f else 0.15f), RoundedCornerShape(12.dp))
-            .background(tint.copy(alpha = if (enabled) 0.1f else 0.03f))
+            .border(
+                width = if (highlighted) 2.dp else 1.dp,
+                color = if (highlighted) tint else tint.copy(alpha = if (enabled) 0.4f else 0.15f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .background(tint.copy(alpha = if (highlighted) 0.28f else if (enabled) 0.1f else 0.03f))
             .clickable(enabled = enabled) { onClick() }
             .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -594,6 +624,10 @@ private fun ChatActionButton(iconRes: Int, label: String, tint: Color, enabled: 
             modifier = Modifier.size(20.dp)
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(label, fontSize = 10.sp, color = if (enabled) tint else tint.copy(alpha = 0.4f))
+        Text(
+            if (highlighted) "Listening..." else label,
+            fontSize = 10.sp,
+            color = if (enabled) tint else tint.copy(alpha = 0.4f)
+        )
     }
 }

@@ -17,6 +17,20 @@ import android.content.Context
  */
 object BrainRouter {
 
+    // Response style fix - Vincent's feedback: replies were too long by
+    // default, used Markdown syntax (##, **, tables with | and ---) that
+    // just shows up as literal symbols in a plain chat bubble (this app
+    // has no Markdown renderer), and the TTS voice was reading those
+    // symbols/table dashes aloud too. Applied to every persona/provider
+    // call, not just VINCE, since the complaint applies everywhere.
+    private const val RESPONSE_STYLE_INSTRUCTION =
+        "Formatting rules for your reply: keep it concise and to the point by default - " +
+            "give the key takeaway in a few sentences, then ask if the user wants more " +
+            "detail rather than front-loading everything. Never use Markdown syntax " +
+            "(no #, ##, **, tables with | or ---, bullet dashes) since this is a plain " +
+            "chat bubble with no Markdown rendering - write in plain natural sentences " +
+            "instead, using line breaks for separate points if needed."
+
     // Stage 15 fix - real conversational memory. Every call to sendMessage
     // was previously completely stateless: only the current typed message
     // was ever sent, with zero awareness of anything said earlier in the
@@ -64,7 +78,7 @@ object BrainRouter {
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
         val memoryBlock = StructuredMemory.buildContextBlock(context)
-        val contextBlock = listOf(persona.roleDescription, memoryBlock)
+        val contextBlock = listOf(persona.roleDescription, RESPONSE_STYLE_INSTRUCTION, memoryBlock)
             .filter { it.isNotBlank() }
             .joinToString(" ")
 

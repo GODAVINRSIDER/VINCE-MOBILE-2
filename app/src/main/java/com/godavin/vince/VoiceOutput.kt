@@ -69,15 +69,36 @@ object VoiceOutput {
         tts?.speak(stripMarkdownForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
     }
 
-    /** Strips Markdown formatting characters (**, *, #, `, _) before
-     * handing text to the speech engine - TTS has no idea these are
-     * formatting symbols, so it was literally reading them aloud
-     * mid-sentence ("asterisk asterisk...", "hash hash..."), breaking up
-     * the flow. The on-screen chat text is untouched - only what's
-     * spoken gets cleaned. */
+    /** Cleans text before handing it to the speech engine - TTS has no
+     * idea Markdown symbols are formatting, so it was literally reading
+     * them aloud mid-sentence ("hash hash", "dash dash dash..." for a
+     * whole table-separator line). Also fixes trading-timeframe
+     * shorthand ("15m", "1h") being read as units of distance/other
+     * words instead of minutes/hours - genuinely different meaning in
+     * this app's context, worth spelling out for speech specifically
+     * (the on-screen text is untouched either way). */
     private fun stripMarkdownForSpeech(text: String): String {
         return text
-            .replace(Regex("[*_#`]"), "")
+            // Whole lines that are just a Markdown table separator
+            // ("|---|---|" etc) or a horizontal rule ("---") - these
+            // have nothing worth speaking, drop the entire line rather
+            // than reading out a string of dashes.
+            .lines()
+            .filterNot { line ->
+                val trimmed = line.trim()
+                trimmed.isNotEmpty() && trimmed.all { it == '-' || it == '|' || it == ':' || it == ' ' }
+            }
+            .joinToString("\n")
+            // Trading timeframe shorthand -> spoken form. Word-boundary
+            // + digit-immediately-before-letter keeps this from matching
+            // unrelated words (won't touch "room" or "channel", only a
+            // number directly followed by m/h/d/w).
+            .replace(Regex("\\b(\\d+)m\\b")) { "${it.groupValues[1]} minute" }
+            .replace(Regex("\\b(\\d+)h\\b")) { "${it.groupValues[1]} hour" }
+            .replace(Regex("\\b(\\d+)d\\b")) { "${it.groupValues[1]} day" }
+            .replace(Regex("\\b(\\d+)w\\b")) { "${it.groupValues[1]} week" }
+            // Table pipes and remaining Markdown symbols - strip, not speak.
+            .replace(Regex("[|*_#`]"), "")
             .replace(Regex("\\n{2,}"), ". ")
             .trim()
     }

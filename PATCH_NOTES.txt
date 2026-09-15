@@ -1,44 +1,58 @@
-SETTINGS SCREEN FIX + GOOGLE DRIVE BACKUP/RESTORE
-=====================================================
+DISCARD DEEPSEEK + CONCISE RESPONSES + VOICE FIXES
+========================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
 choose overwrite.
 
-WHAT WAS ACTUALLY WRONG
----------------------------
-Found the real bug behind the screenshot: the Settings screen never had
-scroll support added, even as it grew to 4 stacked sections (API keys,
-System checks, Security, Backup). Once that content got taller than
-your screen, everything past the bottom edge was being clipped - that's
-what made your API keys look empty (they were still saved fine, just
-scrolled out of the visible/reachable area) and what produced that
-stray line through "Battery optimization" (a text field's border
-getting cut off exactly at the screen edge, not an actual strikethrough).
+1. DEEPSEEK - FULLY REMOVED
+   Pulled back out per your call - Settings field, API key slot, and the
+   BrainRouter fallback branch are all gone. Back to Gemini -> Groq ->
+   OpenRouter, same as before any of this started.
 
-FIXES
---------
-1. Added proper scrolling to the whole Settings screen - every section
-   is reachable now, nothing gets clipped.
-2. Grouped each section into its own dark bordered card (API keys,
-   System checks, App lock, Backup & restore) instead of a long
-   continuous list separated by thin dividers - clearer visual
-   separation, matches the card style already used on the Dashboard.
-3. Backup/restore now has two clearly separate buttons like you asked:
-   - "Backup to Google Drive" tries to open Drive directly with your
-     backup file ready to upload. If Drive isn't installed, it falls
-     back to the normal share sheet so it never dead-ends.
-   - "Restore from Google Drive" opens the file picker, which already
-     lists Drive as a browsable source right alongside your phone's own
-     storage - so you can pick a backup straight out of Drive.
+2. RESPONSES - CONCISE BY DEFAULT, NO MARKDOWN
+   Every persona now gets a standing instruction: keep replies short and
+   to the point by default (key takeaway in a few sentences), then ASK
+   if you want the fuller detail rather than dumping everything at
+   once - your call whether to go deeper. Also told to never use
+   Markdown syntax (no ##, **, tables with | or ---, bullet dashes) -
+   this chat has no Markdown renderer, so those were just showing up as
+   literal symbols cluttering the bubble, exactly like your screenshot.
+   Applies to chat AND chart/photo/screen analysis - that prompt got the
+   same treatment (quick one-line read, then asks if you want the full
+   breakdown instead of front-loading a table every time).
+
+3. TIMEFRAME PRONUNCIATION FIXED (VOICE ONLY)
+   "15m" was being read as "15 metres." Now speech-cleans trading
+   shorthand before speaking: 15m -> "15 minute", 1h -> "1 hour", 1d ->
+   "1 day", 1w -> "1 week". On-screen text is untouched - this only
+   changes what gets spoken.
+
+4. TABLE DASHES NO LONGER READ ALOUD
+   Whole lines that are just a Markdown table separator (a row of
+   dashes/pipes) or a "---" divider now get dropped entirely before
+   speaking, instead of VINCE reading out a string of "dash dash dash."
+   Combined with fix #2 above (AI told not to produce tables in the
+   first place), this should rarely even come up going forward, but
+   it's a safety net either way.
+
+5. IN-CHAT MIC - SAME FIX AS THE WIDGET/HOME MIC
+   Found it: the mic button INSIDE a chat was still launching Google's
+   own floating "Speak now" popup, even after the widget and Home mic
+   were already fixed to skip that. Now uses the same direct-speech
+   approach - no popup, just the mic button's own border/background
+   lighting up and saying "Listening..." while it's picking up your
+   voice.
 
 TESTING CHECKLIST
 --------------------
-1. Open Settings - confirm you can scroll all the way down and every
-   section (API keys, System checks, App lock, Backup) is in its own
-   card, fully visible, nothing clipped or overlapping.
-2. Confirm your API keys are still there (not actually lost - just
-   re-enter and Save if they do show blank, to be safe).
-3. Tap "Backup to Google Drive" - confirm Drive opens (or the share
-   sheet, if Drive isn't installed) with a real file ready to save.
-4. Tap "Restore from Google Drive" - confirm the file picker shows
-   Drive as one of the browsable locations.
+1. Send a message that would normally get a long answer (e.g. ask for a
+   chart-style breakdown) - confirm the reply is short with an offer for
+   more detail, no ##/**/tables visible in the bubble.
+2. Ask something involving a timeframe out loud or have VINCE speak a
+   reply mentioning one (e.g. "the 15m chart") - confirm it says
+   "15 minute", not "15 metres."
+3. Confirm Settings no longer shows a DeepSeek field anywhere.
+4. Tap the mic INSIDE a chat thread - confirm no Google popup appears,
+   just the button itself lighting up while listening.
+5. Do a camera/screen chart analysis - confirm the response is a quick
+   read with an offer for more detail, not a full table dump.

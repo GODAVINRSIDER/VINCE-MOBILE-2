@@ -1,58 +1,46 @@
-TIME-OF-DAY AWARENESS + SUMMARY-STYLE CHAT TITLES
-========================================================
+REAL WEB SEARCH ADDED (TAVILY) - THE ACTUAL "STAY UP TO DATE" FIX
+=======================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
 choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-TitleGenerator.kt exists afterward (new file).
+WebSearchTool.kt exists afterward (new file).
 
-1. TIME-OF-DAY AWARENESS
-   Same mechanism as the date fix - every message now also tells the AI
-   the real time of day off your phone's clock (morning/afternoon/
-   evening/late night), so a natural "good morning"/"good evening" can
-   happen when a greeting is actually called for (start of a
-   conversation, etc) - not forced into every single reply, just aware
-   of it.
+WHAT THIS ACTUALLY IS
+--------------------------
+Not another chat AI provider - a SEARCH tool. This is the real fix for
+what you were asking about: date/time awareness (already fixed) tells
+VINCE when it is; this tells it what's actually happening, by fetching
+real current web results when a question needs them and handing them to
+the AI before it answers. Same pattern that lets me answer current-
+events questions - retrieval, not extra training.
 
-2. CHAT TITLES - NOW SUMMARY-STYLE
-   New chats used to just take your first typed sentence, truncated at
-   40 characters, as the title. Now, right after a brand-new thread's
-   first exchange, a quick background request summarizes what the
-   conversation was actually about into a short 3-6 word title (e.g.
-   "Gold 15m Breakout Setup" instead of whatever you happened to type
-   first) - happens after the reply, so it never slows anything down,
-   and only touches a thread's title if it's still on the auto default
-   (never overwrites a title you set yourself).
+Uses Tavily - a search API built specifically for AI agents (returns
+clean text, not raw web pages to parse). Free tier: 1,000 searches a
+month, no card needed to sign up at tavily.com.
 
-3. RENAME A CHAT BY COMMAND
-   Type or say "rename this chat to [name]" / "call this chat [name]" /
-   "title this chat [name]" inside any chat, and it renames that thread
-   directly - no AI call needed, instant, and confirms back to you.
+HOW IT DECIDES WHEN TO SEARCH
+----------------------------------
+Not every message - that would slow down ordinary chat and burn your
+free searches for no reason. It only reaches for the web when your
+message sounds like it needs current info: words like "latest,"
+"current," "recent," "this week," "today's," "search for," "news
+about," "who is the current," etc. Ordinary conversation and anything
+that doesn't need live info skips it entirely and answers normally,
+same speed as before.
 
-ON YOUR "IS IT NOW UP TO DATE" QUESTION - important distinction
---------------------------------------------------------------------
-Worth being precise here since it matters: this fixes DATE AWARENESS -
-VINCE will no longer reason like it's still 2024/2025, and now has a
-sense of morning/evening too. But it does NOT give the underlying AI
-model new knowledge of things that happened after its own training
-cutoff. The model's actual factual knowledge is still frozen wherever
-its training data ended - knowing today's real date doesn't retroactively
-teach it about news, prices, or events since then. For anything that
-genuinely needs to be live (today's news, current prices), the app
-needs a dedicated tool that actually fetches that data in the moment -
-which is exactly what the time/date/economic-calendar features already
-do (and what price-fetching used to do before it got removed). So:
-date-aware now, yes. Automatically knowledgeable about anything that
-happened after each model's training cutoff, no - that would need a
-real-time fetch tool built for that specific thing, same pattern as
-what's already there for the calendar.
+SETUP NEEDED
+----------------
+1. Sign up free at tavily.com, grab your API key.
+2. Settings > paste it into the new "Tavily API key" field, Save.
+Without a key saved, this feature just silently does nothing - no
+error, chat behaves exactly as it did before.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm TitleGenerator.kt exists after extraction.
-2. Start a conversation at a time of day with an obvious greeting
-   moment (morning/evening) - see if a natural greeting reflects it.
-3. Start a brand new chat, send one message, wait for the reply - check
-   the Chats list a moment later and confirm the title changed from your
-   raw text to a short summary.
-4. In any chat, type "rename this chat to Test Title" - confirm it
-   renames instantly and confirms back, without going through the AI.
+1. Confirm WebSearchTool.kt exists after extraction.
+2. Add your Tavily key in Settings.
+3. Ask something that needs current info, e.g. "what's the latest news
+   on the Fed's interest rate decision" - confirm the answer reflects
+   real recent information, not a vague/outdated guess.
+4. Ask an ordinary question with no trigger words - confirm it still
+   answers instantly, no extra delay (search skipped).

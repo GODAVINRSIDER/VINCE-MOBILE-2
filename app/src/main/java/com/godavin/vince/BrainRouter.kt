@@ -112,7 +112,30 @@ object BrainRouter {
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
         val memoryBlock = StructuredMemory.buildContextBlock(context)
-        val contextBlock = listOf(persona.roleDescription, RESPONSE_STYLE_INSTRUCTION, currentDateGrounding(), memoryBlock)
+
+        // Fix - real up-to-date knowledge, not just date/time awareness.
+        // Knowing today's date doesn't teach any model what's actually
+        // happened since its training cutoff - that needs an actual
+        // fetch. When the message sounds like it needs current
+        // information, this pulls real web results (Tavily) and hands
+        // them to the AI as grounding, same retrieval pattern that lets
+        // Claude itself answer current-events questions. Silently
+        // skipped if no Tavily key is saved, or if the message doesn't
+        // look like it needs live info - kept narrow on purpose so
+        // ordinary conversation stays fast and doesn't hit the network
+        // for no reason.
+        val tavilyKey = ApiKeyStore.getKey(context, Provider.TAVILY)
+        val searchBlock = if (tavilyKey.isNotBlank() && WebSearchTool.needsSearch(userMessage)) {
+            WebSearchTool.search(tavilyKey, userMessage).getOrNull()?.let {
+                "Real, current web search results for this question (use these to answer " +
+                    "accurately instead of relying on your training data, which may be " +
+                    "outdated):\n$it"
+            } ?: ""
+        } else {
+            ""
+        }
+
+        val contextBlock = listOf(persona.roleDescription, RESPONSE_STYLE_INSTRUCTION, currentDateGrounding(), memoryBlock, searchBlock)
             .filter { it.isNotBlank() }
             .joinToString(" ")
 

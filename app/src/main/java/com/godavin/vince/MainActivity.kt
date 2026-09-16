@@ -137,6 +137,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var groqText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.GROQ)) }
     var openRouterText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.OPENROUTER)) }
     var finnhubText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.FINNHUB)) }
+    var tavilyText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.TAVILY)) }
     var saved by remember { mutableStateOf(false) }
 
     // Fix - this screen grew to 4 stacked sections (API keys, System
@@ -205,6 +206,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                "Tavily API key (optional - real-time web search, free tier available at tavily.com)",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            OutlinedTextField(
+                value = tavilyText,
+                onValueChange = { tavilyText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -214,6 +227,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ApiKeyStore.saveKey(context, Provider.GROQ, groqText)
                     ApiKeyStore.saveKey(context, Provider.OPENROUTER, openRouterText)
                     ApiKeyStore.saveKey(context, Provider.FINNHUB, finnhubText)
+                    ApiKeyStore.saveKey(context, Provider.TAVILY, tavilyText)
                     saved = true
                 }) {
                     Text("Save")

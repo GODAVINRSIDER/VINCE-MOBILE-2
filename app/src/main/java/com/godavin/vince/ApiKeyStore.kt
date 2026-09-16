@@ -10,6 +10,7 @@ enum class Provider(val displayName: String, val prefKey: String) {
     GROQ("Groq", "groq_api_key"),
     OPENROUTER("OpenRouter", "openrouter_api_key"),
     FINNHUB("Finnhub", "finnhub_api_key"),
+    TAVILY("Tavily", "tavily_api_key"),
 }
 
 /**

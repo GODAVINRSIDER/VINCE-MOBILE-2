@@ -12,16 +12,17 @@ import android.util.Base64
  * silently, same as BrainRouter.
  *
  * Model choice notes:
- * - Groq: "qwen/qwen3.6-27b" is Groq's current vision-capable model
- *   (free-tier eligible as of when this was built - Groq's model
- *   lineup shifts fairly often, so if this specific name ever gets
- *   retired, check console.groq.com/docs/vision for the replacement).
- * - OpenRouter: "nvidia/nemotron-nano-12b-v2-vl:free" is a genuinely
- *   free vision-capable model on OpenRouter (no credits needed) - same
- *   "OpenRouter's exact free model rotates" caveat as the text chain's
- *   "openrouter/free" router already handles for text, but there isn't
- *   an equivalent auto-routing alias for vision specifically yet, so
- *   this one's a named model rather than a router alias.
+ * - Groq: "meta-llama/llama-4-scout-17b-16e-instruct" - Groq's
+ *   production-tier vision model. (The first version of this used
+ *   qwen/qwen3.6-27b, which turned out to be a preview-only model many
+ *   accounts don't have access to - confirmed broken via a real 404
+ *   from Vincent's device - switched to this more broadly-available one.)
+ * - OpenRouter: found DYNAMICALLY via OpenAiCompatibleClient.
+ *   findFreeVisionModel() rather than a hardcoded slug - OpenRouter's
+ *   specific free vision model names change often enough that
+ *   hardcoding one already broke twice (proven on-device). Asking
+ *   OpenRouter's own live model list which vision model is currently
+ *   free is self-correcting instead of another guess.
  */
 object VisionRouter {
 
@@ -46,7 +47,7 @@ object VisionRouter {
             val result = OpenAiCompatibleClient.sendMessageWithImage(
                 baseUrl = "https://api.groq.com/openai/v1/chat/completions",
                 apiKey = groqKey,
-                model = "qwen/qwen3.6-27b",
+                model = "meta-llama/llama-4-scout-17b-16e-instruct",
                 question = question,
                 imageBase64 = imageBase64,
                 providerLabel = "Groq vision"
@@ -56,16 +57,18 @@ object VisionRouter {
         }
 
         if (openRouterKey.isNotBlank()) {
+            val model = OpenAiCompatibleClient.findFreeVisionModel(openRouterKey)
+                ?: "meta-llama/llama-3.2-11b-vision-instruct:free" // last-resort guess if discovery itself fails
             val result = OpenAiCompatibleClient.sendMessageWithImage(
                 baseUrl = "https://openrouter.ai/api/v1/chat/completions",
                 apiKey = openRouterKey,
-                model = "nvidia/nemotron-nano-12b-v2-vl:free",
+                model = model,
                 question = question,
                 imageBase64 = imageBase64,
                 providerLabel = "OpenRouter vision"
             )
             result.onSuccess { return result }
-            attempts.add("OpenRouter vision: ${result.exceptionOrNull()?.message ?: "failed"}")
+            attempts.add("OpenRouter vision ($model): ${result.exceptionOrNull()?.message ?: "failed"}")
         }
 
         if (attempts.isEmpty()) {

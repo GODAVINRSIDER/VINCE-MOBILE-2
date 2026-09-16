@@ -37,6 +37,9 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Fix - widget boot-restart. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- Fix - "open <app>" was failing for every app ("couldn't find an
          app called WhatsApp") because Android 11+ hides other installed
          apps from PackageManager queries by default (package visibility)
@@ -93,6 +96,17 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+
+        <!-- Fix - restarts the floating widget after a phone reboot if
+             it was on before, instead of it staying off until the app is
+             manually reopened. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Stage 15 - floating overlay mic service. specialUse is the
              generic Android 14+ foreground-service type for services that

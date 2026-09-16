@@ -20,6 +20,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -378,9 +379,11 @@ fun DashboardScreen(
                         } else if (!overlayOn) {
                             context.startService(Intent(context, OverlayService::class.java))
                             overlayOn = true
+                            WidgetState.setEnabled(context, true)
                         } else {
                             context.stopService(Intent(context, OverlayService::class.java))
                             overlayOn = false
+                            WidgetState.setEnabled(context, false)
                         }
                     }
                 )
@@ -658,6 +661,7 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
         personas.forEach { p ->
             val isActive = p == active
             val scale = if (isActive) pulse else 0.85f
+            val satellitePx = with(density) { (satelliteDp * scale).toPx() }
             Box(
                 modifier = Modifier
                     .offset {
@@ -684,6 +688,23 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
                             )
                         )
                     )
+                    // Off-center highlight (light source from the upper
+                    // left) - a real, if simple, bevel/sphere cue that a
+                    // flat centered gradient can't give.
+                    .background(
+                        androidx.compose.ui.graphics.Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = if (isActive) 0.28f else 0.1f), Color.Transparent),
+                            center = Offset(satellitePx * 0.32f, satellitePx * 0.28f),
+                            radius = satellitePx * 0.5f
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(Color.White.copy(alpha = if (isActive) 0.55f else 0.2f), p.color().copy(alpha = 0.4f))
+                        ),
+                        shape = CircleShape
+                    )
                     .clickable { onPersonaTapped(p) },
                 contentAlignment = Alignment.Center
             ) {
@@ -697,6 +718,7 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
         }
 
         // Center hub - tap to cycle to the next persona.
+        val centerPx = with(density) { centerDp.toPx() }
         Box(
             modifier = Modifier
                 .size(centerDp)
@@ -711,6 +733,20 @@ private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit
                             Color.Transparent
                         )
                     )
+                )
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.3f), Color.Transparent),
+                        center = Offset(centerPx * 0.32f, centerPx * 0.28f),
+                        radius = centerPx * 0.5f
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                        listOf(Color.White.copy(alpha = 0.5f), Color(0xFF8B5CF6).copy(alpha = 0.5f))
+                    ),
+                    shape = CircleShape
                 )
                 .clickable { cycleNext() },
             contentAlignment = Alignment.Center

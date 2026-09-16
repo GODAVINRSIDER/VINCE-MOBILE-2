@@ -1,43 +1,74 @@
-VISION FALLBACK CHAIN - PHOTO/SCREEN ANALYSIS NO LONGER DIES WHEN GEMINI QUOTA HITS
-========================================================================================
+VISION FALLBACK REAL FIX + PIN SECURITY + CHAT UX + WIDGET REBOOT + RETRY + RING DEPTH
+============================================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
 choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-VisionRouter.kt exists afterward (new file).
+WidgetState.kt and BootReceiver.kt both exist afterward (new files).
 
-WHAT CHANGED
----------------
-Photo and screen analysis now falls back automatically, same as chat
-already does:
-1. Gemini's vision API (unchanged, still tried first - best quality)
-2. If that fails (quota, timeout, anything) -> Groq's vision model
-3. If that also fails -> OpenRouter's free vision model
+1. VISION FALLBACK - ACTUALLY FIXED THIS TIME
+   Your screenshot showed both fallback models returning 404 "model not
+   found" - I'd guessed two model names that turned out not to actually
+   exist/be accessible. Real fix:
+   - Groq: switched from the preview-only model that failed to
+     "meta-llama/llama-4-scout-17b-16e-instruct" - Groq's standard,
+     broadly-available vision model.
+   - OpenRouter: instead of guessing another hardcoded free-model name
+     (proven fragile - that's exactly what broke last time), it now
+     asks OpenRouter's own live model list which vision model is
+     currently free and uses that automatically. This is the real,
+     durable fix - if OpenRouter's free vision model changes again in
+     the future, this adapts on its own instead of breaking again.
 
-This applies everywhere vision is used: in-chat Camera/Screen buttons,
-the floating widget's two-finger camera/screen gestures - all three now
-go through the same fallback chain.
+2. PIN SECURITY - CLOSED THE HOLE YOU FLAGGED
+   Removing the PIN now requires typing the current PIN first - no more
+   one-tap disable on an already-unlocked phone. Also added a recovery
+   option: set a security question (Settings, alongside the PIN) so a
+   forgotten PIN isn't a permanent lockout - the lock screen gets a
+   "Forgot PIN?" link that, once you answer correctly, lets you set a
+   brand new PIN right there.
 
-No new key needed - this uses the SAME Gemini/Groq/OpenRouter keys
-already in Settings for text chat. If you only have a Gemini key saved,
-behavior is unchanged (no fallback available, same as before). Add a
-Groq and/or OpenRouter key if you haven't already, to actually get the
-benefit of this.
+3. CHAT - JUMP TO LATEST + EXPANDING INPUT BOX
+   - A small down-arrow button now appears once you've scrolled away
+     from the latest message - tap it to jump straight back down instead
+     of scrolling by hand.
+   - The message box now grows as you type a longer message (wraps and
+     expands, up to about 6 lines) instead of staying one thin line with
+     earlier text sliding out of view.
 
-ONE THING TO KNOW
----------------------
-Groq and OpenRouter's vision models are solid but not identical in
-quality/style to Gemini's - if a photo analysis ever reads a little
-different in phrasing when you've hit Gemini's quota, that's why: it's
-a different model answering, not a bug. The underlying chart-reading
-prompt/instructions are identical either way.
+4. WIDGET SURVIVES A REBOOT NOW
+   If the floating widget was on, it automatically comes back after your
+   phone restarts, instead of staying off until you manually reopen the
+   app and flip it back on.
+
+5. RETRY ON FLAKY NETWORK HICCUPS
+   A genuinely transient failure (dropped connection, timeout) now gets
+   retried once before giving up on that provider - a half-second
+   network hiccup shouldn't cost a whole provider attempt the way a real
+   quota/auth error should.
+
+6. RING - PUSHED FURTHER (same honest caveat as before: still not
+   literal 3D, that needs a different kind of tool entirely)
+   Added an off-center highlight on the hub and each persona circle
+   (simulates a light source, a real bevel/sphere cue flat gradients
+   can't give) and a thin bright rim border around each - genuinely more
+   dimensional than before. Judge for yourself if it's closer to what
+   you wanted.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm VisionRouter.kt exists after extraction.
-2. With your Gemini key still working, do a normal chart photo analysis
-   - confirm it works exactly as before (Gemini, unchanged).
-3. To actually test the fallback: temporarily clear/break your Gemini
-   key in Settings (or wait until you hit quota again), then try a photo
-   analysis - confirm it still gets a real answer instead of failing,
-   coming from Groq or OpenRouter this time.
-4. Put your real Gemini key back afterward if you cleared it for testing.
+1. Confirm WidgetState.kt and BootReceiver.kt exist after extraction.
+2. Try a photo/screen analysis with Gemini quota exhausted (or
+   temporarily break the Gemini key) - confirm it now actually succeeds
+   via Groq or OpenRouter instead of failing again.
+3. Settings - try removing your PIN, confirm it now asks for the current
+   PIN first. Set a recovery question, force-close, and on the lock
+   screen tap "Forgot PIN?" - confirm the question shows, wrong answer
+   is rejected, right answer lets you set a new PIN.
+4. In a long chat, scroll up - confirm a down-arrow button appears, tap
+   it, confirm it jumps to the latest message.
+5. Type a long message in the input box - confirm it grows taller
+   instead of scrolling sideways.
+6. Turn the widget on, restart your phone, confirm it comes back on its
+   own without opening the app.
+7. Look at the Dashboard ring - see if the extra highlight/rim makes it
+   feel more dimensional.

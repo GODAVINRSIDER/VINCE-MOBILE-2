@@ -440,14 +440,14 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Box(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             items(messages) { msg ->
                 val msgPersona = Persona.fromName(msg.persona)
                 val color = if (msg.fromUser) MaterialTheme.colorScheme.onSurface else msgPersona.color()
@@ -505,6 +505,33 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     )
                 }
             }
+            }
+
+            // Fix - jump-to-bottom button, so getting to the latest
+            // message doesn't mean scrolling all the way down by hand.
+            // Only shown once scrolled away from the bottom.
+            val isAtBottom by remember {
+                derivedStateOf {
+                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    lastVisible >= messages.size - 1
+                }
+            }
+            if (!isAtBottom && messages.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(activePersona.color())
+                        .clickable {
+                            scope.launch { listState.animateScrollToItem(messages.size - 1) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("\u2193", fontSize = 18.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
         }
 
         // Stage 15 - quick-action suggestion chips, same spirit as the
@@ -527,18 +554,22 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
 
 
-        // Stage 15 fix - input redesigned to a rounded pill field with a
-        // circular arrow send button, matching the reference layout,
-        // instead of a plain text field + text "Send" button.
+        // Fix - input field was singleLine, so as you typed a longer
+        // message it just scrolled horizontally within one line (earlier
+        // text sliding out of view) instead of wrapping - now grows
+        // vertically like a normal chat app, up to a reasonable cap so
+        // it can't swallow the whole screen.
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Bottom) {
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 52.dp, max = 150.dp),
                     placeholder = { Text("Message ${activePersona.displayName}...") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(28.dp)
+                    maxLines = 6,
+                    shape = RoundedCornerShape(24.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(

@@ -333,6 +333,12 @@ fun BackupSection() {
  * Security/PIN layer - optional. No PIN set = no lock screen ever,
  * exactly like before. Set one and it's required once per fresh app
  * launch (see RootScreen). Stored as a SHA-256 hash only (SecurityLock.kt).
+ *
+ * Fix - removing the PIN used to be a single tap with no verification at
+ * all, meaning anyone holding an already-unlocked phone could just turn
+ * the lock off. Now requires re-entering the current PIN first. Also
+ * added an optional recovery question (own hashed answer, same as the
+ * PIN itself) so a forgotten PIN isn't a permanent lockout.
  */
 @Composable
 fun SecuritySection() {
@@ -340,6 +346,10 @@ fun SecuritySection() {
     var pinSet by remember { mutableStateOf(SecurityLock.isPinSet(context)) }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
+    var recoveryQuestion by remember { mutableStateOf("") }
+    var recoveryAnswer by remember { mutableStateOf("") }
+    var removePinEntry by remember { mutableStateOf("") }
+    var showRemoveConfirm by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
     Text(
@@ -360,12 +370,91 @@ fun SecuritySection() {
     Spacer(modifier = Modifier.height(12.dp))
 
     if (pinSet) {
+        if (!showRemoveConfirm) {
+            Button(onClick = { showRemoveConfirm = true }) {
+                Text("Remove PIN")
+            }
+        } else {
+            Text(
+                "Enter your current PIN to confirm removal:",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedTextField(
+                value = removePinEntry,
+                onValueChange = { if (it.length <= 8) removePinEntry = it },
+                label = { Text("Current PIN") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                ),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row {
+                Button(onClick = {
+                    if (SecurityLock.verifyPin(context, removePinEntry)) {
+                        SecurityLock.clearPin(context)
+                        pinSet = false
+                        showRemoveConfirm = false
+                        removePinEntry = ""
+                        message = "PIN removed."
+                    } else {
+                        message = "That PIN is incorrect - PIN not removed."
+                    }
+                }) {
+                    Text("Confirm removal")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(onClick = {
+                    showRemoveConfirm = false
+                    removePinEntry = ""
+                }) {
+                    Text("Cancel")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = if (SecurityLock.hasRecoveryQuestion(context))
+                "Recovery question is set - you can reset a forgotten PIN with it."
+            else
+                "No recovery question set - if you forget your PIN, there's currently no way back in except reinstalling. Set one below.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = recoveryQuestion,
+            onValueChange = { recoveryQuestion = it },
+            label = { Text("Security question") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = recoveryAnswer,
+            onValueChange = { recoveryAnswer = it },
+            label = { Text("Answer") },
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
         Button(onClick = {
-            SecurityLock.clearPin(context)
-            pinSet = false
-            message = "PIN removed."
+            if (recoveryQuestion.isBlank() || recoveryAnswer.isBlank()) {
+                message = "Fill in both the question and the answer."
+            } else {
+                SecurityLock.setRecoveryQuestion(context, recoveryQuestion, recoveryAnswer)
+                recoveryQuestion = ""
+                recoveryAnswer = ""
+                message = "Recovery question saved."
+            }
         }) {
-            Text("Remove PIN")
+            Text("Save recovery question")
         }
     } else {
         OutlinedTextField(
@@ -401,7 +490,7 @@ fun SecuritySection() {
                     pinSet = true
                     newPin = ""
                     confirmPin = ""
-                    message = "PIN set."
+                    message = "PIN set. Scroll down to also set a recovery question, in case you forget it."
                 }
             }
         }) {

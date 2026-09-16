@@ -1,74 +1,58 @@
-VISION FALLBACK REAL FIX + PIN SECURITY + CHAT UX + WIDGET REBOOT + RETRY + RING DEPTH
-============================================================================================
+TIME-OF-DAY AWARENESS + SUMMARY-STYLE CHAT TITLES
+========================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
 choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-WidgetState.kt and BootReceiver.kt both exist afterward (new files).
+TitleGenerator.kt exists afterward (new file).
 
-1. VISION FALLBACK - ACTUALLY FIXED THIS TIME
-   Your screenshot showed both fallback models returning 404 "model not
-   found" - I'd guessed two model names that turned out not to actually
-   exist/be accessible. Real fix:
-   - Groq: switched from the preview-only model that failed to
-     "meta-llama/llama-4-scout-17b-16e-instruct" - Groq's standard,
-     broadly-available vision model.
-   - OpenRouter: instead of guessing another hardcoded free-model name
-     (proven fragile - that's exactly what broke last time), it now
-     asks OpenRouter's own live model list which vision model is
-     currently free and uses that automatically. This is the real,
-     durable fix - if OpenRouter's free vision model changes again in
-     the future, this adapts on its own instead of breaking again.
+1. TIME-OF-DAY AWARENESS
+   Same mechanism as the date fix - every message now also tells the AI
+   the real time of day off your phone's clock (morning/afternoon/
+   evening/late night), so a natural "good morning"/"good evening" can
+   happen when a greeting is actually called for (start of a
+   conversation, etc) - not forced into every single reply, just aware
+   of it.
 
-2. PIN SECURITY - CLOSED THE HOLE YOU FLAGGED
-   Removing the PIN now requires typing the current PIN first - no more
-   one-tap disable on an already-unlocked phone. Also added a recovery
-   option: set a security question (Settings, alongside the PIN) so a
-   forgotten PIN isn't a permanent lockout - the lock screen gets a
-   "Forgot PIN?" link that, once you answer correctly, lets you set a
-   brand new PIN right there.
+2. CHAT TITLES - NOW SUMMARY-STYLE
+   New chats used to just take your first typed sentence, truncated at
+   40 characters, as the title. Now, right after a brand-new thread's
+   first exchange, a quick background request summarizes what the
+   conversation was actually about into a short 3-6 word title (e.g.
+   "Gold 15m Breakout Setup" instead of whatever you happened to type
+   first) - happens after the reply, so it never slows anything down,
+   and only touches a thread's title if it's still on the auto default
+   (never overwrites a title you set yourself).
 
-3. CHAT - JUMP TO LATEST + EXPANDING INPUT BOX
-   - A small down-arrow button now appears once you've scrolled away
-     from the latest message - tap it to jump straight back down instead
-     of scrolling by hand.
-   - The message box now grows as you type a longer message (wraps and
-     expands, up to about 6 lines) instead of staying one thin line with
-     earlier text sliding out of view.
+3. RENAME A CHAT BY COMMAND
+   Type or say "rename this chat to [name]" / "call this chat [name]" /
+   "title this chat [name]" inside any chat, and it renames that thread
+   directly - no AI call needed, instant, and confirms back to you.
 
-4. WIDGET SURVIVES A REBOOT NOW
-   If the floating widget was on, it automatically comes back after your
-   phone restarts, instead of staying off until you manually reopen the
-   app and flip it back on.
-
-5. RETRY ON FLAKY NETWORK HICCUPS
-   A genuinely transient failure (dropped connection, timeout) now gets
-   retried once before giving up on that provider - a half-second
-   network hiccup shouldn't cost a whole provider attempt the way a real
-   quota/auth error should.
-
-6. RING - PUSHED FURTHER (same honest caveat as before: still not
-   literal 3D, that needs a different kind of tool entirely)
-   Added an off-center highlight on the hub and each persona circle
-   (simulates a light source, a real bevel/sphere cue flat gradients
-   can't give) and a thin bright rim border around each - genuinely more
-   dimensional than before. Judge for yourself if it's closer to what
-   you wanted.
+ON YOUR "IS IT NOW UP TO DATE" QUESTION - important distinction
+--------------------------------------------------------------------
+Worth being precise here since it matters: this fixes DATE AWARENESS -
+VINCE will no longer reason like it's still 2024/2025, and now has a
+sense of morning/evening too. But it does NOT give the underlying AI
+model new knowledge of things that happened after its own training
+cutoff. The model's actual factual knowledge is still frozen wherever
+its training data ended - knowing today's real date doesn't retroactively
+teach it about news, prices, or events since then. For anything that
+genuinely needs to be live (today's news, current prices), the app
+needs a dedicated tool that actually fetches that data in the moment -
+which is exactly what the time/date/economic-calendar features already
+do (and what price-fetching used to do before it got removed). So:
+date-aware now, yes. Automatically knowledgeable about anything that
+happened after each model's training cutoff, no - that would need a
+real-time fetch tool built for that specific thing, same pattern as
+what's already there for the calendar.
 
 TESTING CHECKLIST
 --------------------
-1. Confirm WidgetState.kt and BootReceiver.kt exist after extraction.
-2. Try a photo/screen analysis with Gemini quota exhausted (or
-   temporarily break the Gemini key) - confirm it now actually succeeds
-   via Groq or OpenRouter instead of failing again.
-3. Settings - try removing your PIN, confirm it now asks for the current
-   PIN first. Set a recovery question, force-close, and on the lock
-   screen tap "Forgot PIN?" - confirm the question shows, wrong answer
-   is rejected, right answer lets you set a new PIN.
-4. In a long chat, scroll up - confirm a down-arrow button appears, tap
-   it, confirm it jumps to the latest message.
-5. Type a long message in the input box - confirm it grows taller
-   instead of scrolling sideways.
-6. Turn the widget on, restart your phone, confirm it comes back on its
-   own without opening the app.
-7. Look at the Dashboard ring - see if the extra highlight/rim makes it
-   feel more dimensional.
+1. Confirm TitleGenerator.kt exists after extraction.
+2. Start a conversation at a time of day with an obvious greeting
+   moment (morning/evening) - see if a natural greeting reflects it.
+3. Start a brand new chat, send one message, wait for the reply - check
+   the Chats list a moment later and confirm the title changed from your
+   raw text to a short summary.
+4. In any chat, type "rename this chat to Test Title" - confirm it
+   renames instantly and confirms back, without going through the AI.

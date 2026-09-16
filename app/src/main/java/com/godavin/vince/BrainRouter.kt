@@ -66,6 +66,40 @@ object BrainRouter {
         }
     }
 
+    // Fix - Vincent noticed VINCE reasoning as if it were 2024/2025 in
+    // regular conversation (not the explicit "what's the date" command,
+    // which was always correct - RealTimeTools handles that locally).
+    // The AI MODEL itself only knows whatever year its training data
+    // ended around, and has no built-in awareness of real time - unless
+    // told the actual current date, it defaults to that stale internal
+    // assumption whenever a date/year comes up in ordinary reasoning
+    // (market outlooks, "as of today," etc). This computes the real
+    // date fresh off the phone's own clock on every single call and
+    // states it plainly, so the model always has real ground truth
+    // regardless of provider or how out of date its training is.
+    private fun currentDateGrounding(): String {
+        val fmt = java.text.SimpleDateFormat("EEEE, MMMM d, yyyy", java.util.Locale.getDefault())
+        val now = java.util.Calendar.getInstance()
+        val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
+        // Real local time-of-day off the phone's own clock - lets the
+        // model naturally say "good morning"/"good evening" etc. when a
+        // greeting is actually called for, instead of a canned one-size
+        // greeting or none at all. Deliberately phrased as awareness,
+        // not an instruction to greet every single reply with it.
+        val timeOfDay = when (hour) {
+            in 5..11 -> "morning"
+            in 12..16 -> "afternoon"
+            in 17..20 -> "evening"
+            else -> "late night"
+        }
+        return "The real current date is ${fmt.format(java.util.Date())} - treat this as fact " +
+            "regardless of what your own training data suggests the current date/year is, " +
+            "since your training has a cutoff and this is the phone's actual live clock. " +
+            "It's currently $timeOfDay where the user is - use a natural greeting matching " +
+            "that time of day when a greeting is actually called for (e.g. the start of a " +
+            "conversation), not forced into every single reply."
+    }
+
     suspend fun sendMessage(
         context: Context,
         userMessage: String,
@@ -78,7 +112,7 @@ object BrainRouter {
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
         val memoryBlock = StructuredMemory.buildContextBlock(context)
-        val contextBlock = listOf(persona.roleDescription, RESPONSE_STYLE_INSTRUCTION, memoryBlock)
+        val contextBlock = listOf(persona.roleDescription, RESPONSE_STYLE_INSTRUCTION, currentDateGrounding(), memoryBlock)
             .filter { it.isNotBlank() }
             .joinToString(" ")
 

@@ -88,14 +88,46 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         }
     }
 
+    // Fix - explicit chat rename command. Checked before the normal
+    // local-command-then-AI pipeline, same "deterministic first"
+    // discipline as everywhere else - "call this chat X" is a direct
+    // instruction, not something to hand to the AI to interpret.
+    val RENAME_PATTERNS = listOf(
+        Regex("^(?:rename|call|title|name) this chat (?:to |as )?(.+)$", RegexOption.IGNORE_CASE),
+        Regex("^(?:rename|call|title|name) this conversation (?:to |as )?(.+)$", RegexOption.IGNORE_CASE)
+    )
+
     fun send(overrideText: String? = null) {
         val text = (overrideText ?: input).trim()
         if (text.isEmpty() || sending) return
+
+        for (pattern in RENAME_PATTERNS) {
+            val match = pattern.find(text)
+            if (match != null) {
+                val newTitle = match.groupValues[1].trim().trim('"', '\'')
+                if (newTitle.isNotBlank()) {
+                    ConversationStore.renameThread(context, threadId, newTitle)
+                    input = ""
+                    val userMsg = ChatMessage(fromUser = true, text = text)
+                    val replyMsg = ChatMessage(
+                        fromUser = false,
+                        text = "Got it, this chat is now called \"$newTitle\".",
+                        persona = activePersona.name
+                    )
+                    messages.add(userMsg)
+                    messages.add(replyMsg)
+                    ConversationStore.addMessage(context, threadId, userMsg)
+                    ConversationStore.addMessage(context, threadId, replyMsg)
+                    return
+                }
+            }
+        }
 
         // Stage 15 fix - snapshot the thread's history BEFORE adding this
         // new user message, so BrainRouter gets everything said so far
         // without double-counting the message being sent right now.
         val historySnapshot = messages.toList()
+        val isFirstExchange = historySnapshot.isEmpty()
 
         val userMsg = ChatMessage(fromUser = true, text = text)
         messages.add(userMsg)
@@ -119,6 +151,22 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             }
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
+            }
+
+            // Fix - auto-title this thread from a real summary of what
+            // was actually said, instead of just truncating the first
+            // sentence typed. Fired after the reply so it never delays
+            // the reply itself; only runs on a thread's genuine first
+            // exchange, and only overwrites the auto "New chat" default
+            // (a manually-set or already-summarized title is never
+            // touched by this).
+            if (isFirstExchange) {
+                val currentTitle = ConversationStore.getThread(context, threadId)?.title
+                if (currentTitle == "New chat" || currentTitle == text.take(40)) {
+                    TitleGenerator.generateTitle(context, text, reply)?.let { summary ->
+                        ConversationStore.renameThread(context, threadId, summary)
+                    }
+                }
             }
         }
     }

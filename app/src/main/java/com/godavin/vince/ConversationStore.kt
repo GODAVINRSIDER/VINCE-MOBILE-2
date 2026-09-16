@@ -142,4 +142,14 @@ object ConversationStore {
         list.removeAll { it.id == threadId }
         persist(context)
     }
+
+    /** Sets a thread's title directly - used both by the "call this chat
+     * X" voice/typed command and by the auto-generated summary title
+     * after a thread's first exchange. */
+    fun renameThread(context: Context, threadId: String, newTitle: String) {
+        val list = load(context)
+        val thread = list.find { it.id == threadId } ?: return
+        thread.title = newTitle.take(60)
+        persist(context)
+    }
 }

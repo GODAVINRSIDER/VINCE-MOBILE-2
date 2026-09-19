@@ -12,10 +12,13 @@ import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +27,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,12 +35,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -44,24 +49,24 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlin.math.roundToInt
 
-// Stage 10 - real chart-analysis prompt: a quick one-line verdict up
-// front (trend / key level type / rough probability), THEN the detailed
-// interactive breakdown - matches Vincent's actual price-action/SMC
-// trading approach and how he wants to skim it at a glance first. Used
-// as the default whenever a photo/screen capture is sent with no typed
-// question; a typed question always overrides this. This text is sent
-// to the AI but never shown in the chat bubble itself (see
-// sendBitmapForAnalysis below) - only what Vincent actually typed shows.
-private const val DEFAULT_CHART_PROMPT = "You're looking at a trading chart for an " +
-    "experienced price-action/smart-money-concepts trader. Give ONE quick summary line " +
-    "in plain sentence form (no Markdown, no headers, no tables, no bullet dashes): the " +
-    "timeframe if visible, whether it's in a downtrend/uptrend/range, the key level " +
-    "spotted (FVG/order block/support/resistance/breakout-retest/etc), and a rough buy/" +
-    "sell probability. Then ask if the user wants the fuller breakdown (support/" +
-    "resistance zones, structure, your honest read) rather than dumping all of it by " +
-    "default - keep it conversational and skimmable, like a second pair of eyes glancing " +
-    "at the chart, not a formatted report."
+// Fix - this used to hard-assume every image was a trading chart, which
+// is exactly what broke on the marketing-email screenshot (DAVINA had
+// to explicitly say "this isn't actually a chart" before it could even
+// answer). Now genuinely neutral: describes whatever's actually there,
+// and only leans into a price-action read if the image is actually a
+// chart. Only used when NOTHING was typed as a caption - a real typed
+// caption/question always takes priority (see the pending-attachment
+// flow below).
+private const val DEFAULT_VISION_PROMPT = "Look at this image and describe what it actually " +
+    "is first, in one line, before analyzing anything - don't assume it's a trading chart " +
+    "unless it genuinely is one. If it IS a trading chart, then give a quick summary line " +
+    "in plain sentence form (no Markdown, no headers, no tables): the timeframe if visible, " +
+    "trend, key level, rough buy/sell lean, then ask if a fuller breakdown is wanted. If " +
+    "it's anything else, just describe/answer naturally based on what it actually shows - " +
+    "stay flexible to whatever the image actually is, don't force a chart-analysis framing " +
+    "onto something that isn't one."
 
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
@@ -72,6 +77,16 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
+    // Fix - swipe-to-reply target (WhatsApp/Instagram style) - set when
+    // a message is swiped, shown as a preview above the input, cleared
+    // once sent or cancelled.
+    var replyTarget by remember { mutableStateOf<ChatMessage?>(null) }
+    // Fix - staged image attachment. Capturing/picking an image no
+    // longer sends it immediately - it sits here as a pending attachment
+    // (previewed above the input) so a caption/question can be typed
+    // AFTER seeing the image, not before it even exists.
+    var pendingImage by remember { mutableStateOf<Bitmap?>(null) }
+    var pendingImageKind by remember { mutableStateOf<String?>(null) }
     // Stage 14 - persona switching. Loaded from PersonaState on open so
     // it's remembered across app restarts/thread switches, not reset to
     // VINCE every time.
@@ -99,6 +114,62 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
     fun send(overrideText: String? = null) {
         val text = (overrideText ?: input).trim()
+
+        // Fix - if an image is staged, sending now packages it with
+        // whatever's typed as the caption/question, instead of the old
+        // flow where tapping Camera/Screen/Files sent instantly. Empty
+        // caption falls back to the neutral describe-this default, not
+        // a trading-chart assumption.
+        val stagedImage = pendingImage
+        val stagedKind = pendingImageKind
+        if (stagedImage != null && !sending) {
+            val typed = text
+            val question = typed.ifBlank { DEFAULT_VISION_PROMPT }
+            val imagePath = ImageStore.save(context, stagedImage)
+            val displayText = typed.ifBlank { null }
+            val userMsg = ChatMessage(
+                fromUser = true,
+                text = displayText ?: "[${stagedKind ?: "Image"}]",
+                imagePath = imagePath
+            )
+            messages.add(userMsg)
+            ConversationStore.addMessage(context, threadId, userMsg)
+            pendingImage = null
+            pendingImageKind = null
+            input = ""
+            sending = true
+
+            scope.launch {
+                val reply = try {
+                    val baos = ByteArrayOutputStream()
+                    stagedImage.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+                    val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+                    val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
+                    val openRouterKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
+                    val result = VisionRouter.describeImage(geminiKey, groqKey, openRouterKey, baos.toByteArray(), question)
+                    result.fold(
+                        onSuccess = { it },
+                        onFailure = { e -> "Couldn't analyze the ${stagedKind ?: "image"}. (${e.message})" }
+                    )
+                } catch (e: Exception) {
+                    "Couldn't process the ${stagedKind ?: "image"}. (${e.message})"
+                }
+
+                val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+                messages.add(replyMsg)
+                ConversationStore.addMessage(context, threadId, replyMsg)
+                ActivityLog.addEvent(context, "${stagedKind ?: "Image"} analyzed")
+                sending = false
+                if (speakReplies) {
+                    VoiceOutput.speak(reply, activePersona)
+                }
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
+                }
+            }
+            return
+        }
+
         if (text.isEmpty() || sending) return
 
         for (pattern in RENAME_PATTERNS) {
@@ -129,10 +200,28 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         val historySnapshot = messages.toList()
         val isFirstExchange = historySnapshot.isEmpty()
 
-        val userMsg = ChatMessage(fromUser = true, text = text)
+        // Fix - swipe-to-reply. When replying to an earlier message, the
+        // AI actually gets told what's being replied to (an explicit
+        // anchor back to that point in the conversation) - the DISPLAYED
+        // message still just shows what was typed; the quoted preview
+        // renders separately in the bubble (see the message list below).
+        val activeReply = replyTarget
+        val textForAi = if (activeReply != null) {
+            "(Replying to earlier message: \"${activeReply.text.take(150)}\") $text"
+        } else {
+            text
+        }
+
+        val userMsg = ChatMessage(
+            fromUser = true,
+            text = text,
+            replyToId = activeReply?.id,
+            replyToPreview = activeReply?.text?.take(80)
+        )
         messages.add(userMsg)
         ConversationStore.addMessage(context, threadId, userMsg)
         input = ""
+        replyTarget = null
         sending = true
 
         scope.launch {
@@ -140,7 +229,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             // memory/reminder commands, then fall through to the AI.
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
-            val reply = localReply ?: BrainRouter.sendMessage(context, text, activePersona, historySnapshot)
+            val reply = localReply ?: BrainRouter.sendMessage(context, textForAi, activePersona, historySnapshot)
             val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
@@ -232,90 +321,20 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Shared by both camera photos and screen captures. `question` is
-    // the FULL prompt actually sent to the AI (default or typed).
-    // `typedByUser` is what Vincent actually typed, or null if he left
-    // it blank and the default prompt was used - the chat bubble only
-    // ever shows typedByUser, never the full default instruction text,
-    // so nothing internal leaks into the visible conversation.
-    fun sendBitmapForAnalysis(bitmap: Bitmap, question: String, kind: String, typedByUser: String?) {
-        if (sending) return
-
-        val displayText = if (typedByUser.isNullOrBlank()) "[$kind]" else "[$kind] $typedByUser"
-        val userMsg = ChatMessage(fromUser = true, text = displayText)
-        messages.add(userMsg)
-        ConversationStore.addMessage(context, threadId, userMsg)
-        input = ""
-        sending = true
-
-        scope.launch {
-            val reply = try {
-                val baos = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-                val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
-                val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
-                val openRouterKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
-                val result = VisionRouter.describeImage(geminiKey, groqKey, openRouterKey, baos.toByteArray(), question)
-                result.fold(
-                    onSuccess = { it },
-                    onFailure = { e -> "Couldn't analyze the $kind. (${e.message})" }
-                )
-            } catch (e: Exception) {
-                "Couldn't process the $kind. (${e.message})"
-            }
-
-            val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
-            messages.add(replyMsg)
-            ConversationStore.addMessage(context, threadId, replyMsg)
-            ActivityLog.addEvent(context, "$kind analyzed")
-            sending = false
-            if (speakReplies) {
-                VoiceOutput.speak(reply, activePersona)
-            }
-            if (messages.isNotEmpty()) {
-                listState.animateScrollToItem(messages.size - 1)
-            }
-        }
-    }
-
-    fun sendImage(uri: Uri, question: String, typedByUser: String?) {
-        if (sending) return
-        sending = true
-        input = ""
-
-        scope.launch {
-            val bitmap = try {
-                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-            } catch (e: Exception) {
-                null
-            }
-            if (bitmap == null) {
-                val displayText = if (typedByUser.isNullOrBlank()) "[Photo]" else "[Photo] $typedByUser"
-                val userMsg = ChatMessage(fromUser = true, text = displayText)
-                messages.add(userMsg)
-                ConversationStore.addMessage(context, threadId, userMsg)
-                val replyMsg = ChatMessage(fromUser = false, text = "Couldn't read the captured photo.")
-                messages.add(replyMsg)
-                ConversationStore.addMessage(context, threadId, replyMsg)
-                sending = false
-                if (messages.isNotEmpty()) {
-                    listState.animateScrollToItem(messages.size - 1)
-                }
-            } else {
-                sending = false
-                sendBitmapForAnalysis(bitmap, question, "Photo", typedByUser)
-            }
-        }
-    }
-
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         val uri = pendingPhotoUri
         if (success && uri != null) {
-            val typed = input.trim()
-            val question = typed.ifBlank { DEFAULT_CHART_PROMPT }
-            sendImage(uri, question, typed.ifBlank { null })
+            val bitmap = try {
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                null
+            }
+            if (bitmap != null) {
+                pendingImage = bitmap
+                pendingImageKind = "Photo"
+            }
         }
     }
 
@@ -341,17 +360,14 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     ) { result ->
         val data = result.data
         if (result.resultCode == Activity.RESULT_OK && data != null) {
-            val typed = input.trim()
-            val question = typed.ifBlank { DEFAULT_CHART_PROMPT }
-
+            // Fix - screen capture now also stages the result instead of
+            // sending it instantly, same as camera/upload - lands in the
+            // pending-attachment preview so a caption can be typed after.
             ScreenCaptureBridge.awaitCapture { bitmap ->
                 if (bitmap != null) {
-                    sendBitmapForAnalysis(bitmap, question, "Screen", typed.ifBlank { null })
+                    pendingImage = bitmap
+                    pendingImageKind = "Screen"
                 } else {
-                    val displayText = if (typed.isBlank()) "[Screen]" else "[Screen] $typed"
-                    val userMsg = ChatMessage(fromUser = true, text = displayText)
-                    messages.add(userMsg)
-                    ConversationStore.addMessage(context, threadId, userMsg)
                     val replyMsg = ChatMessage(
                         fromUser = false,
                         text = "Couldn't capture the screen. Try again - if it keeps " +
@@ -398,21 +414,19 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     // backup for any app/device combo where Screen vision still doesn't
     // cooperate. Uses Android's modern Photo Picker (PickVisualMedia),
     // which needs no storage/media permission at all - the system handles
-    // access, VINCE only ever sees the one image actually picked. Same
-    // "type a question first, tap the button" pattern as Cam/Screen.
+    // access, VINCE only ever sees the one image actually picked.
     val uploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            val typed = input.trim()
-            val question = typed.ifBlank { DEFAULT_CHART_PROMPT }
             val bitmap = try {
                 context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
             } catch (e: Exception) {
                 null
             }
             if (bitmap != null) {
-                sendBitmapForAnalysis(bitmap, question, "Image", typed.ifBlank { null })
+                pendingImage = bitmap
+                pendingImageKind = "Image"
             }
         }
     }
@@ -489,70 +503,154 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
 
         Box(modifier = Modifier.weight(1f)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-            items(messages) { msg ->
-                val msgPersona = Persona.fromName(msg.persona)
-                val color = if (msg.fromUser) MaterialTheme.colorScheme.onSurface else msgPersona.color()
-                val timeLabel = remember(msg.timestamp) {
-                    java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp))
-                }
-
-                Column(
+            // Fix - wrap the whole list in SelectionContainer so message
+            // text can actually be long-pressed and copied, same as any
+            // normal Android text - it never could be before this.
+            SelectionContainer {
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF0D0D0F))
-                        .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-                        .padding(12.dp)
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (!msg.fromUser) {
-                            Box(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .background(color.copy(alpha = 0.15f))
-                                    .border(1.dp, color.copy(alpha = 0.5f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Image(
-                                    painter = painterResource(id = personaIconRes(msgPersona)),
-                                    contentDescription = null,
-                                    colorFilter = ColorFilter.tint(color),
-                                    modifier = Modifier.size(15.dp)
+                    items(messages, key = { it.id }) { msg ->
+                        val msgPersona = Persona.fromName(msg.persona)
+                        val color = if (msg.fromUser) MaterialTheme.colorScheme.onSurface else msgPersona.color()
+                        val timeLabel = remember(msg.timestamp) {
+                            java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp))
+                        }
+
+                        // Fix - swipe-to-reply (WhatsApp/Instagram style).
+                        // Dragging a message right past a small threshold
+                        // sets it as the reply target and snaps back;
+                        // short drags just snap back with no effect.
+                        val density = LocalDensity.current
+                        val maxDragPx = with(density) { 64.dp.toPx() }
+                        val triggerPx = with(density) { 40.dp.toPx() }
+                        val offsetX = remember(msg.id) { Animatable(0f) }
+
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            if (offsetX.value > 4f) {
+                                Text(
+                                    "\u21A9",
+                                    fontSize = 18.sp,
+                                    color = activePersona.color().copy(alpha = (offsetX.value / triggerPx).coerceIn(0f, 1f)),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 4.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-                        Text(
-                            if (msg.fromUser) "You" else msgPersona.displayName,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = color
-                        )
-                        Spacer(modifier = Modifier.weight(1f))
-                        Text(timeLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(msg.text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
-                }
-            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                                    .pointerInput(msg.id) {
+                                        detectHorizontalDragGestures(
+                                            onDragEnd = {
+                                                scope.launch {
+                                                    if (offsetX.value > triggerPx) {
+                                                        replyTarget = msg
+                                                    }
+                                                    offsetX.animateTo(0f, animationSpec = tween(200))
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                scope.launch { offsetX.animateTo(0f, animationSpec = tween(200)) }
+                                            },
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                scope.launch {
+                                                    offsetX.snapTo((offsetX.value + dragAmount).coerceIn(0f, maxDragPx))
+                                                }
+                                            }
+                                        )
+                                    }
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF0D0D0F))
+                                    .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (!msg.fromUser) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(CircleShape)
+                                                .background(color.copy(alpha = 0.15f))
+                                                .border(1.dp, color.copy(alpha = 0.5f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = personaIconRes(msgPersona)),
+                                                contentDescription = null,
+                                                colorFilter = ColorFilter.tint(color),
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+                                    Text(
+                                        if (msg.fromUser) "You" else msgPersona.displayName,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = color
+                                    )
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Text(timeLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                                }
 
-            if (sending) {
-                item {
-                    Text(
-                        text = "${activePersona.displayName} is thinking...",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+                                if (msg.replyToPreview != null) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(color.copy(alpha = 0.08f))
+                                            .border(0.dp, Color.Transparent)
+                                            .padding(8.dp)
+                                    ) {
+                                        Text(
+                                            msg.replyToPreview,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                        )
+                                    }
+                                }
+
+                                if (msg.imagePath != null) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    val thumbBitmap = remember(msg.imagePath) { ImageStore.loadBitmap(msg.imagePath) }
+                                    thumbBitmap?.let {
+                                        Image(
+                                            bitmap = it.asImageBitmap(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 220.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                        )
+                                    }
+                                }
+
+                                if (msg.text.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(msg.text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
+                                }
+                            }
+                        }
+                    }
+
+                    if (sending) {
+                        item {
+                            Text(
+                                text = "${activePersona.displayName} is thinking...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
                 }
-            }
             }
 
             // Fix - jump-to-bottom button, so getting to the latest
@@ -608,6 +706,73 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         // vertically like a normal chat app, up to a reasonable cap so
         // it can't swallow the whole screen.
         Column(modifier = Modifier.padding(16.dp)) {
+            // Fix - reply preview, shown above the input once a message
+            // has been swiped. Cancel (x) clears it without sending.
+            replyTarget?.let { target ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(activePersona.color().copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Replying to: ${target.text.take(60)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "\u2715",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .clickable { replyTarget = null }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            // Fix - staged image preview, shown above the input once a
+            // photo/screen/upload has been captured - awaits a typed
+            // caption instead of auto-sending the instant it's captured.
+            pendingImage?.let { img ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(activePersona.color().copy(alpha = 0.1f))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        bitmap = img.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        "${pendingImageKind ?: "Image"} attached - type a caption or question, or just tap send",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "\u2715",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .clickable { pendingImage = null; pendingImageKind = null }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
             Row(verticalAlignment = Alignment.Bottom) {
                 OutlinedTextField(
                     value = input,
@@ -615,7 +780,12 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 52.dp, max = 150.dp),
-                    placeholder = { Text("Message ${activePersona.displayName}...") },
+                    placeholder = {
+                        Text(
+                            if (pendingImage != null) "Add a caption or question..."
+                            else "Message ${activePersona.displayName}..."
+                        )
+                    },
                     maxLines = 6,
                     shape = RoundedCornerShape(24.dp)
                 )

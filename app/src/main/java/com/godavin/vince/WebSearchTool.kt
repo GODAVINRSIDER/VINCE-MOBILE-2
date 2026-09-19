@@ -45,8 +45,19 @@ object WebSearchTool {
     /** Returns a compact block of real web results (title + short
      * excerpt per result) ready to hand to the AI as extra context - not
      * a final answer itself, since the AI still needs to read and
-     * synthesize it into a natural reply. */
-    suspend fun search(apiKey: String, query: String): Result<String> {
+     * synthesize it into a natural reply.
+     *
+     * [depth] "basic" (default, fast) or "advanced" (Tavily digs deeper
+     * into each page's actual content, slower/more expensive - used by
+     * DeepResearch.kt for genuine research requests, not ordinary
+     * "what's the latest on X" lookups). [maxResults] lets DeepResearch
+     * pull more sources per sub-query than an ordinary lookup needs. */
+    suspend fun search(
+        apiKey: String,
+        query: String,
+        depth: String = "basic",
+        maxResults: Int = 4
+    ): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("No Tavily API key saved."))
         }
@@ -56,8 +67,8 @@ object WebSearchTool {
                 val requestJson = JSONObject().apply {
                     put("api_key", apiKey)
                     put("query", query)
-                    put("max_results", 4)
-                    put("search_depth", "basic")
+                    put("max_results", maxResults)
+                    put("search_depth", depth)
                 }
                 val body = requestJson.toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
@@ -83,7 +94,7 @@ object WebSearchTool {
                     for (i in 0 until results.length()) {
                         val item = results.getJSONObject(i)
                         val title = item.optString("title")
-                        val content = item.optString("content").take(300)
+                        val content = item.optString("content").take(if (depth == "advanced") 800 else 300)
                         summary.append("- $title: $content\n")
                     }
                     Result.success(summary.toString().trim())

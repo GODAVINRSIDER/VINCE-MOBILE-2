@@ -1,46 +1,56 @@
-REAL WEB SEARCH ADDED (TAVILY) - THE ACTUAL "STAY UP TO DATE" FIX
-=======================================================================
+BIG ROUND - copy text, staged images, flexible vision, swipe-to-reply, real deep research
+=================================================================================================
 
 EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite. Confirm app/src/main/java/com/godavin/vince/
-WebSearchTool.kt exists afterward (new file).
+choose overwrite. Confirm ImageStore.kt and DeepResearch.kt both exist.
 
-WHAT THIS ACTUALLY IS
---------------------------
-Not another chat AI provider - a SEARCH tool. This is the real fix for
-what you were asking about: date/time awareness (already fixed) tells
-VINCE when it is; this tells it what's actually happening, by fetching
-real current web results when a question needs them and handing them to
-the AI before it answers. Same pattern that lets me answer current-
-events questions - retrieval, not extra training.
+1. COPY/SELECT TEXT - fixed. Long-press any message to select and copy,
+   same as any normal Android text now.
 
-Uses Tavily - a search API built specifically for AI agents (returns
-clean text, not raw web pages to parse). Free tier: 1,000 searches a
-month, no card needed to sign up at tavily.com.
+2. IMAGE FLOW REDESIGNED - tap Camera/Screen/Files now just STAGES the
+   image (shown as a small preview above the input, with an X to
+   cancel) instead of instantly sending it for analysis. Type a caption
+   or question, or leave it blank and just tap send.
 
-HOW IT DECIDES WHEN TO SEARCH
-----------------------------------
-Not every message - that would slow down ordinary chat and burn your
-free searches for no reason. It only reaches for the web when your
-message sounds like it needs current info: words like "latest,"
-"current," "recent," "this week," "today's," "search for," "news
-about," "who is the current," etc. Ordinary conversation and anything
-that doesn't need live info skips it entirely and answers normally,
-same speed as before.
+3. VISION NO LONGER ASSUMES "TRADING CHART" - this is what caused the
+   DAVINA screenshot mix-up. It now describes what's actually in the
+   image first, and only gives the chart-style read if it genuinely IS
+   a chart. Applies everywhere: in-chat and the floating widget.
 
-SETUP NEEDED
-----------------
-1. Sign up free at tavily.com, grab your API key.
-2. Settings > paste it into the new "Tavily API key" field, Save.
-Without a key saved, this feature just silently does nothing - no
-error, chat behaves exactly as it did before.
+4. IMAGES NOW ACTUALLY PERSIST - every photo/screenshot sent is saved
+   in the app's own storage and stays visible in the chat as a
+   thumbnail, permanently - not just a "[Photo]" placeholder with the
+   image gone. Honest limit: this makes the image visible/referenceable
+   again, but a later text-only follow-up won't automatically re-run
+   vision on it - what carries forward is VINCE's own description of it
+   in the conversation history (already fixed earlier).
 
-TESTING CHECKLIST
---------------------
-1. Confirm WebSearchTool.kt exists after extraction.
-2. Add your Tavily key in Settings.
-3. Ask something that needs current info, e.g. "what's the latest news
-   on the Fed's interest rate decision" - confirm the answer reflects
-   real recent information, not a vague/outdated guess.
-4. Ask an ordinary question with no trigger words - confirm it still
-   answers instantly, no extra delay (search skipped).
+5. SWIPE TO REPLY - swipe any message right (WhatsApp/Instagram style)
+   to reply directly to it - shows a preview above the input, and the
+   AI gets told explicitly what you're replying to.
+
+6. REAL DEEP RESEARCH - "research X" / "look into X" / "investigate X"
+   now runs a genuine multi-step process: the AI breaks the topic into
+   3 angles, runs a real deeper search on each, then synthesizes a
+   thorough answer - not one shallow single search. Needs your Tavily
+   key in Settings (same one added earlier).
+
+TESTING
+----------
+1. Confirm ImageStore.kt and DeepResearch.kt exist after extraction.
+2. Copy some message text - confirm it works.
+3. Send a non-chart image (anything) - confirm it doesn't force a
+   trading-chart read onto it.
+4. Tap Camera, confirm it stages the photo with a preview instead of
+   sending instantly, add a caption, send - confirm it works and the
+   image stays visible after.
+5. Swipe a message right - confirm the reply preview appears, send a
+   follow-up - confirm it references what you replied to.
+6. Ask "research prop firm rules" (with a Tavily key set) - confirm the
+   answer is noticeably more thorough than before.
+
+Git:
+cd "%USERPROFILE%\Desktop\Downloads\VINCE MOBILE 2"
+git add .
+git commit -m "Copy/select text, staged image attachments, flexible vision, image persistence, swipe-to-reply, real multi-step research"
+git push

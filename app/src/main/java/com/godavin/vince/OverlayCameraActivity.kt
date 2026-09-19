@@ -12,19 +12,20 @@ import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-// Same default chart-analysis prompt used by in-app Camera/Screen vision
-// (ChatScreen.kt) - kept here too since ChatScreen's copy is file-private
-// and this needs to behave identically when triggered from the floating
-// widget instead of from inside the app.
-internal const val DEFAULT_OVERLAY_VISION_PROMPT = "You're looking at a trading chart for an " +
-    "experienced price-action/smart-money-concepts trader. Give ONE quick summary line " +
-    "in plain sentence form (no Markdown, no headers, no tables, no bullet dashes): the " +
-    "timeframe if visible, whether it's in a downtrend/uptrend/range, the key level " +
-    "spotted (FVG/order block/support/resistance/breakout-retest/etc), and a rough buy/" +
-    "sell probability. Then ask if the user wants the fuller breakdown (support/" +
-    "resistance zones, structure, your honest read) rather than dumping all of it by " +
-    "default - keep it conversational and skimmable, like a second pair of eyes glancing " +
-    "at the chart, not a formatted report."
+// Fix - same neutral, flexible vision prompt as ChatScreen's
+// DEFAULT_VISION_PROMPT (kept here too since that one's file-private and
+// this needs to behave identically triggered from the floating widget).
+// No longer forces a "this is a trading chart" assumption onto every
+// image - describes what's actually there first, only leans into a
+// price-action read if it genuinely is a chart.
+internal const val DEFAULT_OVERLAY_VISION_PROMPT = "Look at this image and describe what it " +
+    "actually is first, in one line, before analyzing anything - don't assume it's a " +
+    "trading chart unless it genuinely is one. If it IS a trading chart, then give a quick " +
+    "summary line in plain sentence form (no Markdown, no headers, no tables): the " +
+    "timeframe if visible, trend, key level, rough buy/sell lean, then ask if a fuller " +
+    "breakdown is wanted. If it's anything else, just describe/answer naturally based on " +
+    "what it actually shows - stay flexible to whatever the image actually is, don't force " +
+    "a chart-analysis framing onto something that isn't one."
 
 /**
  * Stage 15 - camera vision from the floating overlay widget. The system

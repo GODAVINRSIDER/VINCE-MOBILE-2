@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.UUID
 
 data class ChatMessage(
     val fromUser: Boolean,
@@ -12,7 +13,24 @@ data class ChatMessage(
     // Stage 14 - which persona sent this reply (ignored for user messages).
     // Defaults to VINCE for backward compatibility with threads saved
     // before persona switching existed.
-    val persona: String = "VINCE"
+    val persona: String = "VINCE",
+    // Fix - stable per-message id, needed for swipe-to-reply to point at
+    // a specific earlier message. Old stored messages (saved before this
+    // existed) get a freshly generated one on load - fine, since nothing
+    // needed to reference them by id before now.
+    val id: String = UUID.randomUUID().toString(),
+    // Fix - persisted absolute file path to an image attached to this
+    // message (see ImageStore.kt), so the actual photo/screenshot stays
+    // visible in the chat and survives app restarts, instead of only a
+    // "[Photo]" placeholder with the image itself gone forever. Null for
+    // ordinary text messages and for messages saved before this existed.
+    val imagePath: String? = null,
+    // Fix - swipe-to-reply. Set when this message was sent as an
+    // explicit reply to an earlier one - replyToPreview is a short
+    // denormalized snippet of what was replied to, stored directly so
+    // rendering never needs to look the original message back up.
+    val replyToId: String? = null,
+    val replyToPreview: String? = null
 )
 
 data class ChatThread(
@@ -54,7 +72,11 @@ object ConversationStore {
                                 fromUser = m.getBoolean("fromUser"),
                                 text = m.getString("text"),
                                 timestamp = m.optLong("timestamp", 0L),
-                                persona = m.optString("persona", "VINCE")
+                                persona = m.optString("persona", "VINCE"),
+                                id = m.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                imagePath = if (m.has("imagePath") && !m.isNull("imagePath")) m.optString("imagePath") else null,
+                                replyToId = if (m.has("replyToId") && !m.isNull("replyToId")) m.optString("replyToId") else null,
+                                replyToPreview = if (m.has("replyToPreview") && !m.isNull("replyToPreview")) m.optString("replyToPreview") else null
                             )
                         )
                     }
@@ -90,6 +112,10 @@ object ConversationStore {
                 mo.put("text", m.text)
                 mo.put("timestamp", m.timestamp)
                 mo.put("persona", m.persona)
+                mo.put("id", m.id)
+                mo.put("imagePath", m.imagePath)
+                mo.put("replyToId", m.replyToId)
+                mo.put("replyToPreview", m.replyToPreview)
                 msgArr.put(mo)
             }
             obj.put("messages", msgArr)

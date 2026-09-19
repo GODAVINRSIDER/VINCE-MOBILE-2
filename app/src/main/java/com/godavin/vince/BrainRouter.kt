@@ -124,8 +124,34 @@ object BrainRouter {
         // look like it needs live info - kept narrow on purpose so
         // ordinary conversation stays fast and doesn't hit the network
         // for no reason.
+        //
+        // Fix - genuine multi-angle research for an explicit "research
+        // X" style request (DeepResearch.kt), checked FIRST since it's a
+        // stronger signal than the general needsSearch triggers below -
+        // falls back to an ordinary single search if deep research comes
+        // back empty (bad sub-queries, all searches failed) rather than
+        // answering with nothing.
         val tavilyKey = ApiKeyStore.getKey(context, Provider.TAVILY)
-        val searchBlock = if (tavilyKey.isNotBlank() && WebSearchTool.needsSearch(userMessage)) {
+        var relaxConciseness = false
+        val searchBlock = if (tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
+            val deepResult = DeepResearch.research(context, userMessage)
+            if (deepResult != null) {
+                relaxConciseness = true
+                "Real, multi-angle web research results for this question (several searches " +
+                    "run across different angles of the topic - synthesize a genuinely " +
+                    "thorough answer from these, since a real research request deserves " +
+                    "more than a one-paragraph summary; use headings/sections in plain text " +
+                    "if that helps organize it, still no Markdown symbols):\n$deepResult"
+            } else if (WebSearchTool.needsSearch(userMessage)) {
+                WebSearchTool.search(tavilyKey, userMessage).getOrNull()?.let {
+                    "Real, current web search results for this question (use these to answer " +
+                        "accurately instead of relying on your training data, which may be " +
+                        "outdated):\n$it"
+                } ?: ""
+            } else {
+                ""
+            }
+        } else if (tavilyKey.isNotBlank() && WebSearchTool.needsSearch(userMessage)) {
             WebSearchTool.search(tavilyKey, userMessage).getOrNull()?.let {
                 "Real, current web search results for this question (use these to answer " +
                     "accurately instead of relying on your training data, which may be " +
@@ -135,7 +161,17 @@ object BrainRouter {
             ""
         }
 
-        val contextBlock = listOf(persona.roleDescription, RESPONSE_STYLE_INSTRUCTION, currentDateGrounding(), memoryBlock, searchBlock)
+        val styleInstruction = if (relaxConciseness) {
+            "Formatting rules for your reply: no Markdown syntax (no #, ##, **, tables with " +
+                "| or ---) since this is a plain chat bubble with no Markdown rendering - " +
+                "write in plain natural sentences/paragraphs instead. This one IS an explicit " +
+                "research request, so a genuinely thorough, well-organized answer is what's " +
+                "wanted here - don't artificially shorten it."
+        } else {
+            RESPONSE_STYLE_INSTRUCTION
+        }
+
+        val contextBlock = listOf(persona.roleDescription, styleInstruction, currentDateGrounding(), memoryBlock, searchBlock)
             .filter { it.isNotBlank() }
             .joinToString(" ")
 

@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -52,4 +53,15 @@ dependencies {
     // Stage 2 - talks directly to the Gemini API, no PC involved
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // PC<->Mobile calling - Firestore for call sessions + voice chunks
+    // (deliberately no Firebase Storage - see CallRepository.kt's docstring
+    // for why), Anonymous Auth so Firestore's security rules have SOME
+    // identity to check against without a login screen.
+    implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-auth-ktx")
+    // lets suspend functions .await() a Firebase Task directly, instead of
+    // wrapping every call in a manual callback->coroutine bridge
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 }

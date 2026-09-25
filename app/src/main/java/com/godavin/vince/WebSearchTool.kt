@@ -79,6 +79,60 @@ object WebSearchTool {
         return NEWS_KEYWORDS.any { lower.contains(it) } || lower.contains("news")
     }
 
+    private val QUESTION_STARTERS = listOf(
+        "who ", "who's", "what ", "what's", "when ", "when's", "where ",
+        "why ", "how ", "is ", "are ", "was ", "were ", "does ", "do ",
+        "did ", "will ", "can ", "could ", "has ", "have ", "should "
+    )
+
+    /** Cheap check for "this is phrased as a genuine question" - not a
+     * search decision by itself, just gates whether aiNeedsSearch below
+     * is worth even calling. */
+    fun looksLikeQuestion(text: String): Boolean {
+        val trimmed = text.trim().lowercase()
+        if (trimmed.contains("?")) return true
+        return QUESTION_STARTERS.any { trimmed.startsWith(it) }
+    }
+
+    // Fix - the real, structural problem: "when did Trump meet Xi" needed
+    // NONE of the keyword triggers above ("meet" isn't "met with", no date
+    // word, no "current") and still needed a live check, since the model's
+    // frozen training only knew about 2017-2019 meetings and had zero idea
+    // 2025/2026 ones happened. No keyword list can ever cover every
+    // rewording of every question - that's chasing synonyms forever. This
+    // is the actual fix: for anything phrased as a genuine question that
+    // the keyword list didn't already catch, ask the AI itself (a tiny,
+    // cheap classification call - NOT the full chat reply) whether the
+    // question depends on live information. This is called ONLY when
+    // needsSearch() already returned false AND looksLikeQuestion() is
+    // true, so ordinary chat/commands never pay for the extra call - only
+    // genuinely ambiguous questions do.
+    suspend fun aiNeedsSearch(context: android.content.Context, text: String): Boolean {
+        val prompt = "Question: \"$text\"\n\n" +
+            "Would answering this correctly and completely require checking live/current " +
+            "information - recent events, who currently holds a position, something that " +
+            "happened recently, an ongoing situation, current prices or promotions, or " +
+            "anything that could have changed after a 2024 training cutoff? Reply with " +
+            "exactly one word: YES or NO."
+        val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+        val answer = if (geminiKey.isNotBlank()) {
+            GeminiClient.sendMessage(geminiKey, prompt).getOrNull()
+        } else null
+            ?: run {
+                val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
+                if (groqKey.isNotBlank()) {
+                    OpenAiCompatibleClient.sendMessage(
+                        baseUrl = "https://api.groq.com/openai/v1/chat/completions",
+                        apiKey = groqKey,
+                        model = "openai/gpt-oss-120b",
+                        userMessage = prompt,
+                        providerLabel = "Groq"
+                    ).getOrNull()
+                } else null
+            }
+        return answer?.trim()?.startsWith("YES", ignoreCase = true) == true
+    }
+
     /** Returns a compact block of real web results (title + short
      * excerpt per result) ready to hand to the AI as extra context - not
      * a final answer itself, since the AI still needs to read and

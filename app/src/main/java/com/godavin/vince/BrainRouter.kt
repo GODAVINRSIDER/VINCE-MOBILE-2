@@ -144,6 +144,22 @@ object BrainRouter {
         val tavilyKey = ApiKeyStore.getKey(context, Provider.TAVILY)
         val newsTopic = if (WebSearchTool.looksLikeNews(userMessage)) "news" else "general"
 
+        // Fix - real case that broke: "when did Trump meet Xi" matched
+        // NONE of the keyword triggers ("meet" isn't "met with", no date
+        // word) and got answered wrong from frozen training data with full
+        // confidence. Keyword lists can never cover every rewording, so
+        // this is the actual fix: for anything phrased as a genuine
+        // question that the keyword list missed, ask the AI itself
+        // (WebSearchTool.aiNeedsSearch - one tiny classification call,
+        // not the full reply) whether it depends on live info. Only runs
+        // when needed - ordinary chat/commands never pay for it.
+        val keywordSearchNeeded = WebSearchTool.needsSearch(userMessage)
+        val searchNeeded = keywordSearchNeeded || (
+            tavilyKey.isNotBlank() &&
+            WebSearchTool.looksLikeQuestion(userMessage) &&
+            WebSearchTool.aiNeedsSearch(context, userMessage)
+        )
+
         // Fix - the old grounding text ("use these instead of relying on
         // your training data") was a suggestion, not an instruction, so
         // the model could still blend in stale facts it "remembered"
@@ -170,14 +186,14 @@ object BrainRouter {
                     "thorough answer from these, since a real research request deserves " +
                     "more than a one-paragraph summary; use headings/sections in plain text " +
                     "if that helps organize it, still no Markdown symbols):\n$deepResult"
-            } else if (WebSearchTool.needsSearch(userMessage)) {
+            } else if (searchNeeded) {
                 WebSearchTool.search(tavilyKey, userMessage, topic = newsTopic).getOrNull()?.let {
                     groundingPrefix("current") + it
                 } ?: ""
             } else {
                 ""
             }
-        } else if (tavilyKey.isNotBlank() && WebSearchTool.needsSearch(userMessage)) {
+        } else if (tavilyKey.isNotBlank() && searchNeeded) {
             searchAttempted = true
             WebSearchTool.search(tavilyKey, userMessage, topic = newsTopic).getOrNull()?.let {
                 groundingPrefix("current") + it

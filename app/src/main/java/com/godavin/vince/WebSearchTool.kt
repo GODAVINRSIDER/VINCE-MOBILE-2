@@ -69,16 +69,6 @@ object WebSearchTool {
         return false
     }
 
-    /** True if this looks like a political/news-style question specifically
-     * (as opposed to e.g. "what's the latest gold price") - used to tell
-     * Tavily to sort by chronological relevance (topic "news") instead of
-     * general SEO-ranked pages, per Tavily's own recommendation for
-     * recent-events queries. */
-    fun looksLikeNews(text: String): Boolean {
-        val lower = text.lowercase()
-        return NEWS_KEYWORDS.any { lower.contains(it) } || lower.contains("news")
-    }
-
     private val QUESTION_STARTERS = listOf(
         "who ", "who's", "what ", "what's", "when ", "when's", "where ",
         "why ", "how ", "is ", "are ", "was ", "were ", "does ", "do ",
@@ -133,10 +123,24 @@ object WebSearchTool {
         return answer?.trim()?.startsWith("YES", ignoreCase = true) == true
     }
 
-    /** Returns a compact block of real web results (title + short
-     * excerpt per result) ready to hand to the AI as extra context - not
-     * a final answer itself, since the AI still needs to read and
-     * synthesize it into a natural reply.
+    /** Returns a compact block of real web results (title + published date
+     * + short excerpt per result) ready to hand to the AI as extra
+     * context - not a final answer itself, since the AI still needs to
+     * read and synthesize it into a natural reply.
+     *
+     * Fix - Vincent's "when did they meet recently?" case exposed a real
+     * gap here: that query DID reach this function (Tavily confirmed 43
+     * credits used), but ran with topic "general" (SEO-ranked), which
+     * happily returned well-established 2017-2019 pages that outrank a
+     * few-day-old article on pure relevance. Two changes fix the actual
+     * retrieval, not just the trigger detection: (1) [days] - when set
+     * (only valid alongside topic "news"), tells Tavily to hard-filter
+     * OUT any result older than that many days, rather than just
+     * preferring newer ones - old pages can no longer sneak through by
+     * out-ranking a recent one. (2) each result now shows its own
+     * published date inline, so even if an older result does slip in,
+     * the model can see it's stale and weigh it correctly instead of
+     * treating every result as equally "current."
      *
      * [depth] "basic" (default, fast) or "advanced" (Tavily digs deeper
      * into each page's actual content, slower/more expensive - used by
@@ -148,7 +152,8 @@ object WebSearchTool {
         query: String,
         depth: String = "basic",
         maxResults: Int = 5,
-        topic: String = "general"
+        topic: String = "general",
+        days: Int? = null
     ): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("No Tavily API key saved."))
@@ -162,6 +167,12 @@ object WebSearchTool {
                     put("max_results", maxResults)
                     put("search_depth", depth)
                     put("topic", topic)
+                    put("include_answer", false)
+                    // days only applies when topic is "news" per Tavily's API -
+                    // this is the hard recency cutoff, not just a ranking hint.
+                    if (topic == "news" && days != null) {
+                        put("days", days)
+                    }
                 }
                 val body = requestJson.toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
@@ -180,7 +191,16 @@ object WebSearchTool {
                     val json = JSONObject(responseBody)
                     val results = json.optJSONArray("results")
                     if (results == null || results.length() == 0) {
-                        return@withContext Result.success("No web results found for this query.")
+                        // Fix - previously returned a filler string that got
+                        // wrapped in "these are ground truth" prefix text,
+                        // which is confusing/contradictory for the model to
+                        // receive. An empty success return here now flows
+                        // into BrainRouter's existing isBlank() check the
+                        // same way a failed search does, so a real zero-
+                        // results case (a real risk now with the days
+                        // recency filter) correctly triggers the honest
+                        // "can't confirm" hedge instead of odd filler text.
+                        return@withContext Result.success("")
                     }
 
                     val summary = StringBuilder()
@@ -188,7 +208,9 @@ object WebSearchTool {
                         val item = results.getJSONObject(i)
                         val title = item.optString("title")
                         val content = item.optString("content").take(if (depth == "advanced") 800 else 300)
-                        summary.append("- $title: $content\n")
+                        val published = item.optString("published_date").takeIf { it.isNotBlank() }
+                        val dateTag = if (published != null) "[published: $published] " else ""
+                        summary.append("- $dateTag$title: $content\n")
                     }
                     Result.success(summary.toString().trim())
                 }

@@ -142,7 +142,19 @@ object BrainRouter {
         // back empty (bad sub-queries, all searches failed) rather than
         // answering with nothing.
         val tavilyKey = ApiKeyStore.getKey(context, Provider.TAVILY)
-        val newsTopic = if (WebSearchTool.looksLikeNews(userMessage)) "news" else "general"
+
+        // Fix - real case that broke even WITH a valid Tavily key firing:
+        // "when did they meet recently?" ran with topic "general" (SEO-
+        // ranked, no recency filter) because "meet"/"recently" weren't on
+        // the narrow NEWS_KEYWORDS list that decided topic - so Tavily
+        // happily returned well-established 2017-2019 pages that outrank
+        // a few-days-old article on pure relevance. Every ordinary search
+        // in this file only ever fires because searchNeeded is true,
+        // which by definition means the question is about something
+        // current - so topic "news" + a hard 365-day recency cutoff
+        // (days, see WebSearchTool.search) is now just how ALL of these
+        // searches run, not a special case for a narrower keyword subset.
+        val SEARCH_RECENCY_DAYS = 365
 
         // Fix - real case that broke: "when did Trump meet Xi" matched
         // NONE of the keyword triggers ("meet" isn't "met with", no date
@@ -165,18 +177,23 @@ object BrainRouter {
         // the model could still blend in stale facts it "remembered"
         // alongside real search results (e.g. an old promo code mixed in
         // with current ones). This version explicitly tells it search
-        // results OVERRIDE conflicting training-data recall.
+        // results OVERRIDE conflicting training-data recall, and now also
+        // spells out how to read the [published: ...] date tag on each
+        // result - so if an older result still slips through, the model
+        // weighs it as stale instead of treating every result as equally
+        // current.
         fun groundingPrefix(label: String) =
             "Real, $label web search results for this question, fetched just now - these are " +
-                "ground truth. If anything here conflicts with what you recall from your own " +
-                "training (who currently holds a position, current prices/promos/codes, " +
-                "whether an event happened), trust these results and do NOT blend in the " +
-                "older version you recall independently:\n"
+                "ground truth. Each result is tagged with its actual publish date where known - " +
+                "pay attention to those dates: a result published years ago does NOT override a " +
+                "more recently published one, and if the most recent result already answers the " +
+                "question, that is the answer, even if it contradicts an older result or your " +
+                "own training-data recall. Do NOT blend in an older version of events you recall " +
+                "independently when these results (especially the most recent ones) say " +
+                "otherwise:\n"
 
         var relaxConciseness = false
-        var searchAttempted = false
         val searchBlock = if (tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
-            searchAttempted = true
             val deepResult = DeepResearch.research(context, userMessage)
             if (deepResult != null) {
                 relaxConciseness = true
@@ -187,37 +204,56 @@ object BrainRouter {
                     "more than a one-paragraph summary; use headings/sections in plain text " +
                     "if that helps organize it, still no Markdown symbols):\n$deepResult"
             } else if (searchNeeded) {
-                WebSearchTool.search(tavilyKey, userMessage, topic = newsTopic).getOrNull()?.let {
+                WebSearchTool.search(
+                    tavilyKey, userMessage, topic = "news", days = SEARCH_RECENCY_DAYS
+                ).getOrNull()?.takeIf { it.isNotBlank() }?.let {
                     groundingPrefix("current") + it
                 } ?: ""
             } else {
                 ""
             }
         } else if (tavilyKey.isNotBlank() && searchNeeded) {
-            searchAttempted = true
-            WebSearchTool.search(tavilyKey, userMessage, topic = newsTopic).getOrNull()?.let {
+            WebSearchTool.search(
+                tavilyKey, userMessage, topic = "news", days = SEARCH_RECENCY_DAYS
+            ).getOrNull()?.takeIf { it.isNotBlank() }?.let {
                 groundingPrefix("current") + it
             } ?: ""
         } else {
             ""
         }
 
-        // Fix - the dangerous silent case: needsSearch says this question
-        // IS about current/recent info, but no search actually happened
-        // (no Tavily key saved, or the call failed/timed out) - previously
-        // this fell straight through to an ordinary reply with zero
-        // warning, so the model answered a "who is the current president"
-        // style question purely from frozen training data with full
-        // confidence and no caveat. Now it's told explicitly to hedge
-        // instead of asserting.
-        val uncertaintyDisclaimer = if (searchAttempted && searchBlock.isBlank()) {
-            "This question is about something current/recent, but a live web check wasn't " +
-                "available just now (no search key saved, or the lookup failed) - do NOT " +
-                "confidently state facts about current officeholders, recent events, meetings, " +
-                "deaths, or anything that may have changed since your training cutoff. Say " +
-                "plainly you can't confirm the latest and, if useful, give your best training-" +
-                "data answer with a clear caveat that it may be outdated, rather than stating " +
-                "it as settled fact."
+        // Fix - the actual bug that let "when did they meet recently?"
+        // (a message that MATCHED the keyword trigger list outright)
+        // still answer wrong with zero warning: this disclaimer used to
+        // only fire when searchAttempted was true, and searchAttempted
+        // was ONLY ever set inside a tavilyKey.isNotBlank() branch. So if
+        // no Tavily key is saved in Settings at all, search is skipped,
+        // searchAttempted silently stays false, and this disclaimer never
+        // fires either - VINCE fell straight through to a fully confident
+        // answer from frozen training data with no caveat whatsoever,
+        // regardless of how obviously the question needed a live check.
+        // Now this is driven by searchNeeded (whether the QUESTION needed
+        // a search) rather than by whether a key happened to be present,
+        // so a missing/failed key can no longer disable the safety net
+        // that's supposed to catch exactly this case.
+        val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank()) {
+            if (tavilyKey.isBlank()) {
+                "This question is about something current/recent, but no web search is " +
+                    "configured at all right now (no Tavily API key saved in Settings) - do " +
+                    "NOT confidently state facts about current officeholders, recent events, " +
+                    "meetings, deaths, or anything that may have changed since your training " +
+                    "cutoff. Say plainly you have no way to confirm the latest without a live " +
+                    "search, and if useful, give your best training-data answer with a clear " +
+                    "caveat that it may be outdated, rather than stating it as settled fact."
+            } else {
+                "This question is about something current/recent, but the live web check just " +
+                    "now failed or timed out - do NOT confidently state facts about current " +
+                    "officeholders, recent events, meetings, deaths, or anything that may have " +
+                    "changed since your training cutoff. Say plainly you can't confirm the " +
+                    "latest right now and, if useful, give your best training-data answer with " +
+                    "a clear caveat that it may be outdated, rather than stating it as settled " +
+                    "fact."
+            }
         } else {
             ""
         }

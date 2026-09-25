@@ -32,14 +32,51 @@ object WebSearchTool {
 
     private val TRIGGER_PHRASES = listOf(
         "latest", "current", "currently", "recent", "recently", "this week",
-        "this month", "today's", "right now", "as of now", "up to date",
-        "what's new", "search for", "search the web", "look up", "find out about",
-        "news about", "who is the current", "what is the current", "nowadays"
+        "this month", "this year", "today's", "today", "tonight", "yesterday",
+        "last night", "last week", "last month", "this season", "right now",
+        "as of now", "up to date", "still the", "is still", "still president",
+        "still ceo", "just happened", "just announced", "breaking",
+        "update on", "status of", "what's new", "search for", "search the web",
+        "look up", "find out about", "news about", "who is the current",
+        "what is the current", "nowadays"
     )
+
+    // Fix - Vincent's real-world case: "did Trump meet Xi yesterday" and
+    // "is Trump the current president" both slipped through the OLD trigger
+    // list ("yesterday" wasn't in it at all, and the political-entity
+    // question didn't happen to contain the literal word "current" every
+    // time), so VINCE answered confidently from stale 2024 training data
+    // instead of ever reaching for Tavily. These are a second, independent
+    // check - a message matching ANY of TRIGGER_PHRASES or NEWS_KEYWORDS
+    // or containing a 2024+ year number triggers a real search. Deliberately
+    // wide here: for questions about officeholders, elections, deaths, wars,
+    // summits, results - being wrong with confidence is worse than one
+    // extra cheap Tavily call.
+    private val NEWS_KEYWORDS = listOf(
+        "president", "prime minister", "ceo of", "who won", "election",
+        "elected", "resigned", "resignation", "died", "passed away", "war in",
+        "invasion", "summit", "met with", "meeting between", "ceasefire",
+        "score", "result of", "who is now", "what happened to"
+    )
+
+    private val YEAR_PATTERN = Regex("\\b20(2[4-9]|3[0-9])\\b")
 
     fun needsSearch(text: String): Boolean {
         val lower = text.lowercase()
-        return TRIGGER_PHRASES.any { lower.contains(it) }
+        if (TRIGGER_PHRASES.any { lower.contains(it) }) return true
+        if (NEWS_KEYWORDS.any { lower.contains(it) }) return true
+        if (YEAR_PATTERN.containsMatchIn(lower)) return true
+        return false
+    }
+
+    /** True if this looks like a political/news-style question specifically
+     * (as opposed to e.g. "what's the latest gold price") - used to tell
+     * Tavily to sort by chronological relevance (topic "news") instead of
+     * general SEO-ranked pages, per Tavily's own recommendation for
+     * recent-events queries. */
+    fun looksLikeNews(text: String): Boolean {
+        val lower = text.lowercase()
+        return NEWS_KEYWORDS.any { lower.contains(it) } || lower.contains("news")
     }
 
     /** Returns a compact block of real web results (title + short
@@ -56,7 +93,8 @@ object WebSearchTool {
         apiKey: String,
         query: String,
         depth: String = "basic",
-        maxResults: Int = 4
+        maxResults: Int = 5,
+        topic: String = "general"
     ): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("No Tavily API key saved."))
@@ -69,6 +107,7 @@ object WebSearchTool {
                     put("query", query)
                     put("max_results", maxResults)
                     put("search_depth", depth)
+                    put("topic", topic)
                 }
                 val body = requestJson.toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()

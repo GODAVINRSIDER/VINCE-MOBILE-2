@@ -1,6 +1,10 @@
 package com.godavin.vince
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Tries Gemini first, then Groq, then OpenRouter - falling through
@@ -57,6 +61,12 @@ object BrainRouter {
     // phone); this cap only governs how much rides along in a single AI
     // call, not what's actually stored.
     private const val MAX_HISTORY_MESSAGES = 60
+
+    // Fix - passive memory capture (see MemoryExtractor.kt). Runs on the
+    // side, off the coroutine that's building the actual reply, so an
+    // extraction call never adds latency to the chat itself and a failure
+    // in it can never affect the visible answer.
+    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private fun buildTranscript(history: List<ChatMessage>): String {
         if (history.isEmpty()) return ""
@@ -132,31 +142,66 @@ object BrainRouter {
         // back empty (bad sub-queries, all searches failed) rather than
         // answering with nothing.
         val tavilyKey = ApiKeyStore.getKey(context, Provider.TAVILY)
+        val newsTopic = if (WebSearchTool.looksLikeNews(userMessage)) "news" else "general"
+
+        // Fix - the old grounding text ("use these instead of relying on
+        // your training data") was a suggestion, not an instruction, so
+        // the model could still blend in stale facts it "remembered"
+        // alongside real search results (e.g. an old promo code mixed in
+        // with current ones). This version explicitly tells it search
+        // results OVERRIDE conflicting training-data recall.
+        fun groundingPrefix(label: String) =
+            "Real, $label web search results for this question, fetched just now - these are " +
+                "ground truth. If anything here conflicts with what you recall from your own " +
+                "training (who currently holds a position, current prices/promos/codes, " +
+                "whether an event happened), trust these results and do NOT blend in the " +
+                "older version you recall independently:\n"
+
         var relaxConciseness = false
+        var searchAttempted = false
         val searchBlock = if (tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
+            searchAttempted = true
             val deepResult = DeepResearch.research(context, userMessage)
             if (deepResult != null) {
                 relaxConciseness = true
                 "Real, multi-angle web research results for this question (several searches " +
-                    "run across different angles of the topic - synthesize a genuinely " +
+                    "run across different angles of the topic - these are ground truth, trust " +
+                    "them over conflicting training-data recall - synthesize a genuinely " +
                     "thorough answer from these, since a real research request deserves " +
                     "more than a one-paragraph summary; use headings/sections in plain text " +
                     "if that helps organize it, still no Markdown symbols):\n$deepResult"
             } else if (WebSearchTool.needsSearch(userMessage)) {
-                WebSearchTool.search(tavilyKey, userMessage).getOrNull()?.let {
-                    "Real, current web search results for this question (use these to answer " +
-                        "accurately instead of relying on your training data, which may be " +
-                        "outdated):\n$it"
+                WebSearchTool.search(tavilyKey, userMessage, topic = newsTopic).getOrNull()?.let {
+                    groundingPrefix("current") + it
                 } ?: ""
             } else {
                 ""
             }
         } else if (tavilyKey.isNotBlank() && WebSearchTool.needsSearch(userMessage)) {
-            WebSearchTool.search(tavilyKey, userMessage).getOrNull()?.let {
-                "Real, current web search results for this question (use these to answer " +
-                    "accurately instead of relying on your training data, which may be " +
-                    "outdated):\n$it"
+            searchAttempted = true
+            WebSearchTool.search(tavilyKey, userMessage, topic = newsTopic).getOrNull()?.let {
+                groundingPrefix("current") + it
             } ?: ""
+        } else {
+            ""
+        }
+
+        // Fix - the dangerous silent case: needsSearch says this question
+        // IS about current/recent info, but no search actually happened
+        // (no Tavily key saved, or the call failed/timed out) - previously
+        // this fell straight through to an ordinary reply with zero
+        // warning, so the model answered a "who is the current president"
+        // style question purely from frozen training data with full
+        // confidence and no caveat. Now it's told explicitly to hedge
+        // instead of asserting.
+        val uncertaintyDisclaimer = if (searchAttempted && searchBlock.isBlank()) {
+            "This question is about something current/recent, but a live web check wasn't " +
+                "available just now (no search key saved, or the lookup failed) - do NOT " +
+                "confidently state facts about current officeholders, recent events, meetings, " +
+                "deaths, or anything that may have changed since your training cutoff. Say " +
+                "plainly you can't confirm the latest and, if useful, give your best training-" +
+                "data answer with a clear caveat that it may be outdated, rather than stating " +
+                "it as settled fact."
         } else {
             ""
         }
@@ -171,9 +216,24 @@ object BrainRouter {
             RESPONSE_STYLE_INSTRUCTION
         }
 
-        val contextBlock = listOf(persona.roleDescription, styleInstruction, currentDateGrounding(), memoryBlock, searchBlock)
+        val contextBlock = listOf(
+            persona.roleDescription, styleInstruction, currentDateGrounding(),
+            memoryBlock, searchBlock, uncertaintyDisclaimer
+        )
             .filter { it.isNotBlank() }
             .joinToString(" ")
+
+        // Fix - passive cross-chat memory capture (MemoryExtractor.kt).
+        // Fire-and-forget on the side: never awaited, never blocks the
+        // reply below, and any failure inside is swallowed - best-effort
+        // only, exactly like StructuredMemory's own save() already is.
+        backgroundScope.launch {
+            try {
+                MemoryExtractor.extractAndSave(context, userMessage)
+            } catch (e: Exception) {
+                // best-effort - a failed extraction must never affect the chat
+            }
+        }
 
         val transcript = buildTranscript(history)
 

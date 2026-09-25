@@ -156,21 +156,25 @@ object BrainRouter {
         // searches run, not a special case for a narrower keyword subset.
         val SEARCH_RECENCY_DAYS = 365
 
-        // Fix - real case that broke: "when did Trump meet Xi" matched
-        // NONE of the keyword triggers ("meet" isn't "met with", no date
-        // word) and got answered wrong from frozen training data with full
-        // confidence. Keyword lists can never cover every rewording, so
-        // this is the actual fix: for anything phrased as a genuine
-        // question that the keyword list missed, ask the AI itself
-        // (WebSearchTool.aiNeedsSearch - one tiny classification call,
-        // not the full reply) whether it depends on live info. Only runs
-        // when needed - ordinary chat/commands never pay for it.
+        // Fix - you asked not to have this depend on wording, and the
+        // previous fix (asking the AI to self-judge "do I need a search")
+        // still did, because that self-check has the same blind spot as
+        // the original wrong answer: a model can't flag a knowledge gap
+        // it doesn't know it has. So this no longer asks the model to
+        // decide - any message that's phrased as a real question
+        // (looksLikeQuestion: has "?" or starts with who/what/when/did/
+        // etc) just searches directly, full stop, alongside the instant
+        // keyword fast-path. You said you'd rather spend Tavily credits
+        // than risk wrong info, so this is deliberately wide now - the
+        // tradeoff is every question-shaped message spends a credit
+        // (including ones that didn't strictly need one, e.g. straight
+        // math or opinion questions), not just current-events-sounding
+        // ones. At 1,000 free credits/month this isn't a real limit at
+        // your current usage - if it ever needs narrowing back down,
+        // that's a one-line change here.
         val keywordSearchNeeded = WebSearchTool.needsSearch(userMessage)
-        val searchNeeded = keywordSearchNeeded || (
-            tavilyKey.isNotBlank() &&
-            WebSearchTool.looksLikeQuestion(userMessage) &&
-            WebSearchTool.aiNeedsSearch(context, userMessage)
-        )
+        val searchNeeded = keywordSearchNeeded ||
+            (tavilyKey.isNotBlank() && WebSearchTool.looksLikeQuestion(userMessage))
 
         // Fix - the old grounding text ("use these instead of relying on
         // your training data") was a suggestion, not an instruction, so

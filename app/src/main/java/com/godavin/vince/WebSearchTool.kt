@@ -84,19 +84,22 @@ object WebSearchTool {
         return QUESTION_STARTERS.any { trimmed.startsWith(it) }
     }
 
-    // Fix - the real, structural problem: "when did Trump meet Xi" needed
-    // NONE of the keyword triggers above ("meet" isn't "met with", no date
-    // word, no "current") and still needed a live check, since the model's
-    // frozen training only knew about 2017-2019 meetings and had zero idea
-    // 2025/2026 ones happened. No keyword list can ever cover every
-    // rewording of every question - that's chasing synonyms forever. This
-    // is the actual fix: for anything phrased as a genuine question that
-    // the keyword list didn't already catch, ask the AI itself (a tiny,
-    // cheap classification call - NOT the full chat reply) whether the
-    // question depends on live information. This is called ONLY when
-    // needsSearch() already returned false AND looksLikeQuestion() is
-    // true, so ordinary chat/commands never pay for the extra call - only
-    // genuinely ambiguous questions do.
+    // Fix - found via direct testing: "when did they meet recently?"
+    // worked (keyword match), but the exact same question WITHOUT
+    // "recently" - "when did Trump meet Xi" - still answered wrong. The
+    // AI self-classifier below has a structural blind spot: asking a
+    // frozen-training model "would you need a live check for this?" only
+    // works if the model already suspects it's missing something. A
+    // question that looks, from inside its own frozen 2024 knowledge,
+    // like an already-fully-answerable historical fact (it confidently
+    // "knows" about 2017/2019 meetings) gives it no signal that anything
+    // happened since - so it answers its own gate-check "NO" and walks
+    // straight into the same stale answer. A model can't reliably judge
+    // what it doesn't know it doesn't know. So this is no longer used as
+    // the search gate - see searchNeeded in BrainRouter.kt, which now
+    // fires on any real question directly instead of asking the model to
+    // self-assess. Left here only in case a narrower, cheaper gate is
+    // ever wanted again later.
     suspend fun aiNeedsSearch(context: android.content.Context, text: String): Boolean {
         val prompt = "Question: \"$text\"\n\n" +
             "Would answering this correctly and completely require checking live/current " +

@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -112,8 +114,8 @@ fun RootScreen() {
     // already on the call screen itself, or before the PIN is unlocked.
     LaunchedEffect(unlocked, screen) {
         if (!unlocked || screen is Screen.InCall) return@LaunchedEffect
-        while (kotlinx.coroutines.isActive) {
-            kotlinx.coroutines.delay(4000)
+        while (isActive) {
+            delay(4000)
             val found = try { CallRepository.findRingingCallFor("phone") } catch (e: Exception) { null }
             if (found != null) {
                 val (id, data) = found

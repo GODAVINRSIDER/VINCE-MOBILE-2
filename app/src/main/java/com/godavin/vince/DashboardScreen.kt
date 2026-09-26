@@ -85,7 +85,8 @@ fun DashboardScreen(
     onOpenChat: () -> Unit,
     onOpenNewChat: () -> Unit,
     onOpenActivityFull: () -> Unit,
-    onOpenMemoryFull: () -> Unit
+    onOpenMemoryFull: () -> Unit,
+    onOpenCall: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -388,6 +389,8 @@ fun DashboardScreen(
                     }
                 )
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            CallQuickActionTile(onClick = onOpenCall)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -497,6 +500,46 @@ private fun MemoryRow(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
         Text(value, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
+    }
+}
+
+/** Full-width entry point into the live PC-VINCE call screen - visually
+ * distinct from the plain grey QuickActionTiles above it so it reads as
+ * the "special" action, matching the reference sheet's gradient ring
+ * language (cyan -> purple -> pink) instead of blending in. */
+@Composable
+private fun CallQuickActionTile(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF4CE1FF).copy(alpha = 0.18f),
+                        Color(0xFF8B5CF6).copy(alpha = 0.18f),
+                        Color(0xFFFF4FD8).copy(alpha = 0.18f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(Color(0xFF4CE1FF), Color(0xFF8B5CF6), Color(0xFFFF4FD8))
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable { onClick() }
+            .padding(vertical = 14.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_vince_triangle),
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Text("Call VINCE PC", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
     }
 }
 

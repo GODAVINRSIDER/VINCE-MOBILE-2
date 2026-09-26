@@ -93,6 +93,7 @@ private sealed class Screen {
     object ActivityFull : Screen()
     object MemoryFull : Screen()
     data class Chat(val threadId: String) : Screen()
+    data class InCall(val mode: CallLaunchMode) : Screen()
 }
 
 @Composable
@@ -104,6 +105,24 @@ fun RootScreen() {
     // task kill) but not on ordinary background/foreground within the
     // same running process. Apps with no PIN ever set skip this entirely.
     var unlocked by remember { mutableStateOf(!SecurityLock.isPinSet(context)) }
+
+    // Watches for the PC calling the phone (findRingingCallFor mirrors
+    // vince_relay.py's own lookup) so an incoming call can interrupt
+    // whatever screen is open, like a real phone call - but never while
+    // already on the call screen itself, or before the PIN is unlocked.
+    LaunchedEffect(unlocked, screen) {
+        if (!unlocked || screen is Screen.InCall) return@LaunchedEffect
+        while (kotlinx.coroutines.isActive) {
+            kotlinx.coroutines.delay(4000)
+            val found = try { CallRepository.findRingingCallFor("phone") } catch (e: Exception) { null }
+            if (found != null) {
+                val (id, data) = found
+                val personaName = (data["persona"] as? String)?.uppercase() ?: Persona.VINCE.name
+                screen = Screen.InCall(CallLaunchMode.Incoming(id, personaName))
+                break
+            }
+        }
+    }
 
     if (!unlocked) {
         PinLockScreen(onUnlocked = { unlocked = true })
@@ -119,12 +138,14 @@ fun RootScreen() {
         is Screen.Chat -> ChatScreen(threadId = s.threadId, onBack = { screen = Screen.ChatList })
         is Screen.ActivityFull -> ActivityLogFullScreen(onBack = { screen = Screen.Home })
         is Screen.MemoryFull -> MemoryFullScreen(onBack = { screen = Screen.Home })
+        is Screen.InCall -> CallScreen(mode = s.mode, onBack = { screen = Screen.Home })
         Screen.Home -> DashboardScreen(
             onOpenSettings = { screen = Screen.Settings },
             onOpenChat = { screen = Screen.ChatList },
             onOpenNewChat = { screen = Screen.Chat(java.util.UUID.randomUUID().toString()) },
             onOpenActivityFull = { screen = Screen.ActivityFull },
-            onOpenMemoryFull = { screen = Screen.MemoryFull }
+            onOpenMemoryFull = { screen = Screen.MemoryFull },
+            onOpenCall = { screen = Screen.InCall(CallLaunchMode.Outgoing) }
         )
     }
 }

@@ -43,12 +43,18 @@ object BrainRouter {
     private const val CAPABILITIES_INSTRUCTION =
         "About yourself: you live inside VINCE Mobile, an Android app, and you are NOT a " +
             "text-only chatbot. You can hear and speak (voice in and out), see through the " +
-            "phone camera and screen, analyze uploaded images and charts, open apps by name, " +
-            "give the time, date and economic calendar, search the web and run multi-step " +
-            "research (when a search key is set), remember facts across every chat, float as " +
-            "a widget over other apps, and make in-app calls to PC-VINCE. You cannot place or " +
-            "manage trades from the phone, control what happens inside other apps, set " +
-            "reminders, or generate images, and you have no live price feed. Never claim an " +
+            "phone camera and screen, analyze uploaded images and trading charts (chart " +
+            "replies can include a trade-idea card with entry, stop, target and risk-reward " +
+            "read off the image), generate images from a text description, open apps and " +
+            "websites, start timers, open maps, give the time, date and economic calendar, " +
+            "set reminders (e.g. 'remind me at 3pm to ...'), send session-open alerts, " +
+            "news heads-ups, a daily briefing and an end-of-day journal check-in, keep the " +
+            "user's trading rules and today's plan, search the web and run multi-step " +
+            "research (when a search key is set), remember facts across every chat, float " +
+            "as a widget over other apps, and make in-app calls to PC-VINCE. You cannot " +
+            "place or manage trades from the phone, you are not linked to any trading " +
+            "account (so you do not know balance, open trades or profit), you cannot control " +
+            "what happens inside other apps, and you have no live price feed. Never claim an " +
             "ability that is not listed here, and never describe yourself as lacking the ones " +
             "that are."
 
@@ -104,7 +110,7 @@ object BrainRouter {
     // date fresh off the phone's own clock on every single call and
     // states it plainly, so the model always has real ground truth
     // regardless of provider or how out of date its training is.
-    private fun currentDateGrounding(): String {
+    private fun currentDateGrounding(mayGreet: Boolean): String {
         val fmt = java.text.SimpleDateFormat("EEEE, MMMM d, yyyy", java.util.Locale.getDefault())
         val now = java.util.Calendar.getInstance()
         val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
@@ -122,9 +128,33 @@ object BrainRouter {
         return "The real current date is ${fmt.format(java.util.Date())} - treat this as fact " +
             "regardless of what your own training data suggests the current date/year is, " +
             "since your training has a cutoff and this is the phone's actual live clock. " +
-            "It's currently $timeOfDay where the user is - use a natural greeting matching " +
-            "that time of day when a greeting is actually called for (e.g. the start of a " +
-            "conversation), not forced into every single reply."
+            "It's currently $timeOfDay where the user is. " + greetingRule(timeOfDay, mayGreet)
+    }
+
+    // Fix - replies kept opening with "Good morning/afternoon" every single
+    // time. Greeting is now decided in code, not left to the model: the
+    // time-of-day greeting is allowed only at the start of a conversation
+    // (or after a long gap), and every later reply is told, explicitly, to
+    // skip it and open the way a person mid-conversation would.
+    private fun greetingRule(timeOfDay: String, mayGreet: Boolean): String {
+        return if (mayGreet) {
+            "This is the start of the conversation, so you may open with ONE short, natural " +
+                "greeting that fits the $timeOfDay (the only greeting of this conversation) " +
+                "and then answer."
+        } else {
+            "You are mid-conversation: do NOT open with any greeting or time-of-day phrase " +
+                "(no good morning, good afternoon, good evening, hello, hey there). Go straight " +
+                "into the answer like a person already talking, and vary how you start: react to " +
+                "what was just said, pick up the thread, or just answer directly. Never open two " +
+                "replies in a row the same way."
+        }
+    }
+
+    // Greet only when the thread is brand new or has been quiet for 6+ hours.
+    private fun mayGreet(history: List<ChatMessage>): Boolean {
+        val lastReply = history.lastOrNull { !it.fromUser } ?: return true
+        val quietMs = System.currentTimeMillis() - lastReply.timestamp
+        return quietMs > 6 * 60 * 60 * 1000L
     }
 
     suspend fun sendMessage(
@@ -290,7 +320,7 @@ object BrainRouter {
         }
 
         val contextBlock = listOf(
-            persona.roleDescription, CAPABILITIES_INSTRUCTION, styleInstruction, currentDateGrounding(),
+            persona.roleDescription, CAPABILITIES_INSTRUCTION, styleInstruction, currentDateGrounding(mayGreet(history)),
             memoryBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }

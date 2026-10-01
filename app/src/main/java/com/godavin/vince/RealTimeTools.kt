@@ -25,6 +25,10 @@ object RealTimeTools {
     private val DATE_TRIGGERS = listOf(
         "what's the date", "whats the date", "what day is it", "today's date", "what is today's date"
     )
+    private val BRIEFING_TRIGGERS = listOf(
+        "briefing", "my briefing", "daily briefing", "morning briefing", "brief me",
+        "give me my briefing", "give me a briefing", "give me the briefing"
+    )
     private val NEWS_TRIGGERS = listOf(
         "high impact", "high-impact", "economic calendar", "upcoming news",
         "upcoming events", "market news", "news calendar", "economic events",
@@ -33,6 +37,14 @@ object RealTimeTools {
 
     suspend fun handleLocalCommand(context: Context, text: String): String? {
         val lower = text.lowercase()
+
+        // Briefing on demand - built from the clock, session times, the
+        // economic calendar, optional headlines, and the user's own rules
+        // and plan (see BriefingBuilder). Not linked to any trading account.
+        val cleaned = lower.trim().trimEnd('.', '!', '?').removePrefix("please ").trim()
+        if (cleaned in BRIEFING_TRIGGERS) {
+            return BriefingBuilder.build(context, includeHeadlines = true)
+        }
 
         if (TIME_TRIGGERS.any { lower.contains(it) }) {
             return currentTimeReply()

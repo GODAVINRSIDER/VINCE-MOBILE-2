@@ -26,7 +26,7 @@ object ReminderScheduler {
     private const val EXTRA_ID = "reminder_id"
     private const val EXTRA_MESSAGE = "reminder_message"
 
-    private fun pendingIntentFor(context: Context, id: Int, message: String): PendingIntent {
+    internal fun pendingIntentFor(context: Context, id: Int, message: String): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra(EXTRA_ID, id)
             putExtra(EXTRA_MESSAGE, message)
@@ -55,9 +55,29 @@ object ReminderScheduler {
             return false
         }
 
-        val pendingIntent = pendingIntentFor(context, id, message)
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, fireAtMillis, pendingIntent)
+        // Fix - armed through AlertScheduler.setReliableAlarm (alarm-clock
+        // alarm, exempt from Doze batching) instead of a plain exact alarm,
+        // which is the weakest type on aggressive OEM battery managers.
+        AlertScheduler.setReliableAlarm(context, fireAtMillis, pendingIntentFor(context, id, message))
         return true
+    }
+
+    /**
+     * Re-arms every saved reminder (app open / phone reboot). A reminder
+     * whose time passed while the phone was off or the app was killed is
+     * shown immediately as a "missed reminder" instead of silently lost.
+     * Never redirects to a settings screen - this runs in the background.
+     */
+    fun rearmAll(context: Context) {
+        val now = System.currentTimeMillis()
+        for (r in ReminderStore.getAll(context)) {
+            if (r.fireAtMillis > now + 1000) {
+                AlertScheduler.setReliableAlarm(context, r.fireAtMillis, pendingIntentFor(context, r.id, r.message))
+            } else {
+                Notifs.show(context, Notifs.CH_REMINDER, r.id, "VINCE (missed reminder)", r.message)
+                ReminderStore.remove(context, r.id)
+            }
+        }
     }
 
     fun cancel(context: Context, id: Int, message: String) {

@@ -78,10 +78,22 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Re-arm every alert/reminder alarm whenever the app opens - alarms
+        // don't survive a force-stop or reboot on their own, so opening
+        // VINCE is also a self-repair. Best-effort: never blocks startup.
+        try {
+            AlertScheduler.rescheduleAll(this)
+        } catch (e: Exception) {
+            // never let alert scheduling stop the app from opening
+        }
+
+        // Tapping a briefing / journal notification opens that thread directly.
+        val startThreadId = intent?.getStringExtra(Notifs.EXTRA_OPEN_THREAD)
+
         setContent {
             VinceTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    RootScreen()
+                    RootScreen(startThreadId)
                 }
             }
         }
@@ -99,8 +111,10 @@ private sealed class Screen {
 }
 
 @Composable
-fun RootScreen() {
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+fun RootScreen(startThreadId: String? = null) {
+    var screen by remember {
+        mutableStateOf<Screen>(if (startThreadId != null) Screen.Chat(startThreadId) else Screen.Home)
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     // Security/PIN layer - unlocked state lives only in this composition,
     // so it resets on every fresh process launch (force-close, reboot,
@@ -270,6 +284,10 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         PanelCard { SystemChecksSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        PanelCard { AlertsSection() }
 
         Spacer(modifier = Modifier.height(20.dp))
 

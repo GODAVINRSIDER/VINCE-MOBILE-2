@@ -12,12 +12,30 @@ android {
         applicationId = "com.godavin.vince"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "2.0-stage1"
+        versionCode = 2
+        versionName = "2.1-alerts"
+    }
+
+    // Fix - every GitHub Actions build used to generate a brand-new random
+    // debug keystore, so each APK had a different signature and Android
+    // refused to install it over the previous one (forcing an uninstall,
+    // which wipes chats, keys and settings). Signing every build with the
+    // same committed keystore (app/debug.keystore) makes updates install
+    // over the top and keep all data. This is a DEBUG key only - it is
+    // public on purpose and not a secret.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
-        debug { }
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {

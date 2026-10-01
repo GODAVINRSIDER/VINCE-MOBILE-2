@@ -27,6 +27,12 @@
          settings screen, handled in ReminderScheduler). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
+    <!-- Oct 2026 - alerts/reminders: USE_EXACT_ALARM is granted automatically
+         on Android 13+ (no settings screen), SET_ALARM lets "set a timer"
+         hand the timer to the Clock app. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
     <!-- Stage 14 fix - reminders only fired while the app was open;
          cause was OEM background-app killing. This lets MainActivity ask,
          once, to be exempted from battery optimization. -->
@@ -95,6 +101,12 @@
         <!-- Stage 13 - receives the AlarmManager alarm when a reminder fires. -->
         <receiver
             android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Oct 2026 - session-open alerts, news heads-ups, daily briefing,
+             journal check-in. -->
+        <receiver
+            android:name=".AlertReceiver"
             android:exported="false" />
 
         <!-- Fix - restarts the floating widget after a phone reboot if

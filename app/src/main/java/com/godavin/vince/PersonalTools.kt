@@ -10,14 +10,19 @@ import android.content.Context
  * returns null if this message matched none of these, in which case it
  * falls through to the normal AI chat path unchanged.
  *
- * Reminders were removed from here per Vincent's call - background
- * firing never worked reliably on his device across several fix
- * attempts, so "remind me..." now just falls through to the AI persona
- * instead of attempting (and failing) to schedule anything.
+ * Reminders are back (Oct 2026) at Vincent's request, rebuilt on
+ * alarm-clock alarms that are re-armed on app open and after a reboot -
+ * see ReminderCommands.kt.
  */
 object PersonalTools {
 
     fun handleLocalCommand(context: Context, text: String): String? {
+        // Trading rules / today's plan, reminders and small phone actions
+        // are all deterministic, so they run before anything else.
+        PlanCommands.handle(context, text)?.let { return it }
+        ReminderCommands.handle(context, text)?.let { return it }
+        DeviceActions.handle(context, text)?.let { return it }
+
         StructuredMemory.handleMemoryCommand(context, text)?.let { return it }
 
         val appName = AppLauncher.extractAppNameFromCommand(text)

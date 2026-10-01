@@ -6,16 +6,21 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 
 /**
- * Widget didn't survive a phone reboot before this - it would just stay
- * off until the user manually reopened the app and flipped it back on.
- * This restarts it automatically on boot, but only if it was actually
- * on before AND the "display over other apps" permission is still
- * granted (Android can't guarantee that survives every OS update, so
- * this checks rather than assumes).
+ * After a phone reboot: (1) re-arm every alert and saved reminder - alarms
+ * do not survive a reboot on their own - and (2) restart the floating
+ * widget if it was on before and the "display over other apps" permission
+ * is still granted.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+
+        try {
+            AlertScheduler.rescheduleAll(context)
+        } catch (e: Exception) {
+            // never let alert re-arming block the widget restart below
+        }
+
         if (!WidgetState.isEnabled(context)) return
         if (!canDrawOverlays(context)) return
 

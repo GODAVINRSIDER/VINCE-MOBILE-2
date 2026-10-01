@@ -124,7 +124,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         val stagedKind = pendingImageKind
         if (stagedImage != null && !sending) {
             val typed = text
-            val question = typed.ifBlank { DEFAULT_VISION_PROMPT }
+            val question = typed.ifBlank { DEFAULT_VISION_PROMPT } + TradeIdea.PROMPT_SUFFIX
             val imagePath = ImageStore.save(context, stagedImage)
             val displayText = typed.ifBlank { null }
             val userMsg = ChatMessage(
@@ -172,7 +172,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 )
                 sending = false
                 if (speakReplies && !visionFailed) {
-                    VoiceOutput.speak(reply, activePersona)
+                    VoiceOutput.speak(TradeIdea.stripForSpeech(reply), activePersona)
                 }
                 if (messages.isNotEmpty()) {
                     listState.animateScrollToItem(messages.size - 1)
@@ -238,6 +238,38 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         scope.launch {
             // Stage 13 - real-time (price/time/news) checked first, then
             // memory/reminder commands, then fall through to the AI.
+            // Image generation ("generate an image of ...") - checked first,
+            // since it needs the network and a longer wait than any local command.
+            val imagePrompt = ImageCommands.extractPrompt(text)
+            if (imagePrompt != null) {
+                val genResult = ImageGenerator.generate(context, imagePrompt)
+                val genMsg = genResult.fold(
+                    onSuccess = { path ->
+                        ChatMessage(
+                            fromUser = false,
+                            text = "Here's your image. Use Copy, Save or Share under it.",
+                            persona = activePersona.name,
+                            imagePath = path
+                        )
+                    },
+                    onFailure = { e ->
+                        ChatMessage(fromUser = false, text = e.message ?: "Couldn't generate the image.", persona = activePersona.name)
+                    }
+                )
+                messages.add(genMsg)
+                // Failure notices are shown but not saved into the thread history.
+                if (genMsg.imagePath != null) ConversationStore.addMessage(context, threadId, genMsg)
+                ActivityLog.addEvent(context, if (genMsg.imagePath != null) "Image generated" else "Image generation failed")
+                sending = false
+                if (speakReplies && genMsg.imagePath != null) {
+                    VoiceOutput.speak("Here's your image.", activePersona)
+                }
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
+                }
+                return@launch
+            }
+
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
             val reply = localReply ?: BrainRouter.sendMessage(context, textForAi, activePersona, historySnapshot)
@@ -642,11 +674,50 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                                                 .clip(RoundedCornerShape(10.dp))
                                         )
                                     }
+                                    // Copy / Save / Share for images VINCE made (generated images).
+                                    if (!msg.fromUser) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val ok = ImageActions.copy(context, msg.imagePath)
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        if (ok) "Image copied" else "Couldn't copy the image",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                                            ) { Text("Copy", fontSize = 12.sp) }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val ok = ImageActions.saveToGallery(context, msg.imagePath)
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        if (ok) "Saved to Pictures/VINCE" else "Couldn't save the image",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                                            ) { Text("Save", fontSize = 12.sp) }
+                                            OutlinedButton(
+                                                onClick = { ImageActions.share(context, msg.imagePath) },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                                            ) { Text("Share", fontSize = 12.sp) }
+                                        }
+                                    }
                                 }
 
-                                if (msg.text.isNotBlank()) {
+                                // Trade-idea block (chart analysis) is drawn as a card;
+                                // the raw [[IDEA]] text never shows in the bubble.
+                                val parsedReply = remember(msg.text) { TradeIdea.split(msg.text) }
+                                if (parsedReply.first.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    Text(msg.text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
+                                    Text(parsedReply.first, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
+                                }
+                                parsedReply.second?.let { idea ->
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    TradeIdeaCard(idea)
                                 }
                             }
                         }

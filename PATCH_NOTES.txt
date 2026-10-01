@@ -1,56 +1,24 @@
-BIG ROUND - copy text, staged images, flexible vision, swipe-to-reply, real deep research
-=================================================================================================
+VINCE MOBILE 2.1 - big round: vision fix, alerts, briefing, reminders, images, trade card
+==========================================================================================
+Extract into your project folder (overwrite). Confirm app/debug.keystore exists.
 
-EXTRACTION - same as always: extract straight into your project folder,
-choose overwrite. Confirm ImageStore.kt and DeepResearch.kt both exist.
+FIRST INSTALL OF THIS BUILD NEEDS ONE LAST UNINSTALL (old builds were signed with a random
+key each time). Before uninstalling: Settings > Backup. API keys and PIN are not in the
+backup - copy your keys somewhere first. After this build, updates install over the top.
 
-1. COPY/SELECT TEXT - fixed. Long-press any message to select and copy,
-   same as any normal Android text now.
-
-2. IMAGE FLOW REDESIGNED - tap Camera/Screen/Files now just STAGES the
-   image (shown as a small preview above the input, with an X to
-   cancel) instead of instantly sending it for analysis. Type a caption
-   or question, or leave it blank and just tap send.
-
-3. VISION NO LONGER ASSUMES "TRADING CHART" - this is what caused the
-   DAVINA screenshot mix-up. It now describes what's actually in the
-   image first, and only gives the chart-style read if it genuinely IS
-   a chart. Applies everywhere: in-chat and the floating widget.
-
-4. IMAGES NOW ACTUALLY PERSIST - every photo/screenshot sent is saved
-   in the app's own storage and stays visible in the chat as a
-   thumbnail, permanently - not just a "[Photo]" placeholder with the
-   image gone. Honest limit: this makes the image visible/referenceable
-   again, but a later text-only follow-up won't automatically re-run
-   vision on it - what carries forward is VINCE's own description of it
-   in the conversation history (already fixed earlier).
-
-5. SWIPE TO REPLY - swipe any message right (WhatsApp/Instagram style)
-   to reply directly to it - shows a preview above the input, and the
-   AI gets told explicitly what you're replying to.
-
-6. REAL DEEP RESEARCH - "research X" / "look into X" / "investigate X"
-   now runs a genuine multi-step process: the AI breaks the topic into
-   3 angles, runs a real deeper search on each, then synthesizes a
-   thorough answer - not one shallow single search. Needs your Tavily
-   key in Settings (same one added earlier).
-
-TESTING
-----------
-1. Confirm ImageStore.kt and DeepResearch.kt exist after extraction.
-2. Copy some message text - confirm it works.
-3. Send a non-chart image (anything) - confirm it doesn't force a
-   trading-chart read onto it.
-4. Tap Camera, confirm it stages the photo with a preview instead of
-   sending instantly, add a caption, send - confirm it works and the
-   image stays visible after.
-5. Swipe a message right - confirm the reply preview appears, send a
-   follow-up - confirm it references what you replied to.
-6. Ask "research prop firm rules" (with a Tavily key set) - confirm the
-   answer is noticeably more thorough than before.
-
-Git:
-cd "%USERPROFILE%\Desktop\Downloads\VINCE MOBILE 2"
-git add .
-git commit -m "Copy/select text, staged image attachments, flexible vision, image persistence, swipe-to-reply, real multi-step research"
-git push
+1. VISION: Gemini retries 503 and falls through to other flash models; Groq model is found
+   live (old llama-4-scout was shut down); OpenRouter tries several free vision models.
+   Errors are short and readable, not saved to chat, not spoken.
+2. ALERTS (Settings > Alerts and briefings): London / New York / Asia open, high-impact
+   news heads-up, daily briefing, journal check-in. Each has its own switch.
+3. BRIEFING: sessions in your time, today's high-impact news, headlines (needs Tavily key),
+   your rules and today's plan. Say "briefing" in chat for it on demand.
+4. RULES / PLAN: "my rules: ...", "today's plan: ...", "show my rules", "clear today's plan".
+5. REMINDERS back: "remind me at 3pm to ...", "remind me in 20 minutes to ...",
+   "list my reminders", "cancel my reminders". Re-armed on app open and after reboot.
+6. GREETING: time-of-day greeting only at the start of a conversation (or after 6h quiet).
+7. IMAGES: "generate an image of ..." with Copy / Save / Share buttons.
+8. TRADE-IDEA CARD under chart analyses (entry, stop, target, R:R calculated in code).
+9. PHONE ACTIONS: "open tradingview.com", "google ...", "set a timer for 10 minutes",
+   "navigate to ...".
+10. Personas now know what the app can and can't do.

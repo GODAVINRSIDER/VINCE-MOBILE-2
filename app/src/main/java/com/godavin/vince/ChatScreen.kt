@@ -140,6 +140,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             sending = true
 
             scope.launch {
+                var visionFailed = false
                 val reply = try {
                     val baos = ByteArrayOutputStream()
                     stagedImage.compress(Bitmap.CompressFormat.JPEG, 80, baos)
@@ -149,18 +150,28 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     val result = VisionRouter.describeImage(geminiKey, groqKey, openRouterKey, baos.toByteArray(), question)
                     result.fold(
                         onSuccess = { it },
-                        onFailure = { e -> "Couldn't analyze the ${stagedKind ?: "image"}. (${e.message})" }
+                        onFailure = { e ->
+                            visionFailed = true
+                            "Couldn't analyze the ${stagedKind ?: "image"}.\n${e.message}"
+                        }
                     )
                 } catch (e: Exception) {
-                    "Couldn't process the ${stagedKind ?: "image"}. (${e.message})"
+                    visionFailed = true
+                    "Couldn't process the ${stagedKind ?: "image"}.\n${e.message}"
                 }
 
                 val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
                 messages.add(replyMsg)
-                ConversationStore.addMessage(context, threadId, replyMsg)
-                ActivityLog.addEvent(context, "${stagedKind ?: "Image"} analyzed")
+                // A failure notice is shown but not saved into the thread's
+                // history (it would pollute the AI's memory of the chat) and
+                // not read aloud.
+                if (!visionFailed) ConversationStore.addMessage(context, threadId, replyMsg)
+                ActivityLog.addEvent(
+                    context,
+                    if (visionFailed) "${stagedKind ?: "Image"} analysis failed" else "${stagedKind ?: "Image"} analyzed"
+                )
                 sending = false
-                if (speakReplies) {
+                if (speakReplies && !visionFailed) {
                     VoiceOutput.speak(reply, activePersona)
                 }
                 if (messages.isNotEmpty()) {

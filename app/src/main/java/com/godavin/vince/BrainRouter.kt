@@ -35,6 +35,23 @@ object BrainRouter {
             "chat bubble with no Markdown rendering - write in plain natural sentences " +
             "instead, using line breaks for separate points if needed."
 
+    // Capabilities awareness - the personas were describing themselves as
+    // "text-only" with no device access, because nothing in the prompt told
+    // them what the app can actually do. Keep this list TRUTHFUL: update it
+    // whenever a capability is added or removed (reminders, image generation,
+    // etc.), or the personas will start claiming things the app can't do.
+    private const val CAPABILITIES_INSTRUCTION =
+        "About yourself: you live inside VINCE Mobile, an Android app, and you are NOT a " +
+            "text-only chatbot. You can hear and speak (voice in and out), see through the " +
+            "phone camera and screen, analyze uploaded images and charts, open apps by name, " +
+            "give the time, date and economic calendar, search the web and run multi-step " +
+            "research (when a search key is set), remember facts across every chat, float as " +
+            "a widget over other apps, and make in-app calls to PC-VINCE. You cannot place or " +
+            "manage trades from the phone, control what happens inside other apps, set " +
+            "reminders, or generate images, and you have no live price feed. Never claim an " +
+            "ability that is not listed here, and never describe yourself as lacking the ones " +
+            "that are."
+
     // Stage 15 fix - real conversational memory. Every call to sendMessage
     // was previously completely stateless: only the current typed message
     // was ever sent, with zero awareness of anything said earlier in the
@@ -273,7 +290,7 @@ object BrainRouter {
         }
 
         val contextBlock = listOf(
-            persona.roleDescription, styleInstruction, currentDateGrounding(),
+            persona.roleDescription, CAPABILITIES_INSTRUCTION, styleInstruction, currentDateGrounding(),
             memoryBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }

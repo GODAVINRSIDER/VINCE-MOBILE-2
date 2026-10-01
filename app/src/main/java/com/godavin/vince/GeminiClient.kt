@@ -1,6 +1,7 @@
 package com.godavin.vince
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -26,7 +27,19 @@ object GeminiClient {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // Fix - a Gemini 503 "high demand" is usually gone seconds later, so one
+    // short retry keeps the answer on Gemini instead of dropping to Groq.
     suspend fun sendMessage(apiKey: String, userMessage: String): Result<String> {
+        val first = sendOnce(apiKey, userMessage)
+        if (first.isSuccess) return first
+        val msg = first.exceptionOrNull()?.message.orEmpty()
+        val transient = listOf("(500)", "(502)", "(503)", "(504)").any { msg.contains(it) }
+        if (!transient) return first
+        delay(1500)
+        return sendOnce(apiKey, userMessage)
+    }
+
+    private suspend fun sendOnce(apiKey: String, userMessage: String): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("No Gemini API key saved."))
         }
@@ -57,7 +70,7 @@ object GeminiClient {
 
                     if (!response.isSuccessful) {
                         return@withContext Result.failure(
-                            Exception("Gemini error (${response.code}): ${responseBody.take(200)}")
+                            Exception("Gemini error (${response.code}): ${ApiErrors.short(responseBody)}")
                         )
                     }
 

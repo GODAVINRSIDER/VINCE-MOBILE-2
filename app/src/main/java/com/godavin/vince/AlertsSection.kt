@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -186,9 +187,18 @@ fun AlertsSection() {
             } catch (e: Exception) { /* settings page unavailable */ }
         }) { Text("Allow exact alarms") }
     }
+    val batteryFree = run {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+    Text(
+        if (batteryFree) "Battery optimization: off for VINCE (good)" else "Battery optimization: ON - the phone may delay alerts",
+        fontSize = 12.sp,
+        color = if (batteryFree) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+    )
     Spacer(modifier = Modifier.height(6.dp))
     Text(
-        "On Xiaomi, Redmi, Tecno and Infinix phones: turn on Autostart for VINCE, set its battery mode to " +
+        "On Xiaomi, Redmi, Tecno, Infinix, Oppo and Realme phones: turn on Autostart for VINCE, set its battery mode to " +
             "\"No restrictions\", and lock VINCE in the recent-apps screen. Swiping VINCE away from recents can " +
             "cancel alarms on some phones; opening the app re-arms everything.",
         fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -236,6 +246,25 @@ fun AlertsSection() {
                 testNote = "Briefing sent - tap the notification to open it."
             }
         }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Test briefing", fontSize = 12.sp) }
+    }
+    Spacer(modifier = Modifier.height(16.dp))
+    Text("Recent alerts (due vs arrived)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    var logTick by remember { mutableStateOf(0) }
+    val logEntries = remember(logTick, testNote) { AlertLog.recent(context, 8) }
+    if (logEntries.isEmpty()) {
+        Text("Nothing yet - entries appear as alerts fire.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    } else {
+        for (e in logEntries) {
+            Text(
+                AlertLog.describe(e), fontSize = 11.sp,
+                color = if (e.lateMinutes > 1) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedButton(
+            onClick = { AlertLog.clear(context); logTick++ },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+        ) { Text("Clear log", fontSize = 12.sp) }
     }
     testNote?.let {
         Spacer(modifier = Modifier.height(4.dp))

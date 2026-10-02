@@ -24,13 +24,18 @@ class AlertReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         val title = intent.getStringExtra(AlertScheduler.EXTRA_TITLE).orEmpty()
         val body = intent.getStringExtra(AlertScheduler.EXTRA_BODY).orEmpty()
+        val scheduledAt = intent.getLongExtra(AlertScheduler.EXTRA_SCHEDULED, 0L)
+
+        // Record intended vs actual delivery time (shown in Settings), so a
+        // late alert can be measured instead of guessed at.
+        try { AlertLog.record(app, type, scheduledAt, System.currentTimeMillis()) } catch (e: Exception) { /* logging only */ }
 
         try { AlertScheduler.onFired(app, type) } catch (e: Exception) { /* keep going */ }
 
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                handle(app, type, title, body)
+                handle(app, type, title, body, scheduledAt)
             } catch (e: Exception) {
                 // an alert must never crash the app
             } finally {
@@ -39,24 +44,14 @@ class AlertReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun handle(context: Context, type: String, title: String, body: String) {
+    private suspend fun handle(context: Context, type: String, title: String, body: String, scheduledAt: Long) {
         when (type) {
-            AlertScheduler.T_LONDON -> Notifs.show(
-                context, Notifs.CH_SESSION, 7101,
-                "London session opening soon",
-                sessionBody(context, "Europe/London", 8, 0, "London opens")
+            AlertScheduler.T_LONDON -> sessionAlert(context, 7101, "London", "Europe/London", 8, 0, scheduledAt, "")
+            AlertScheduler.T_NY -> sessionAlert(
+                context, 7102, "New York", "America/New_York", 8, 0, scheduledAt,
+                " US stocks open at 9:30 AM New York time."
             )
-            AlertScheduler.T_NY -> Notifs.show(
-                context, Notifs.CH_SESSION, 7102,
-                "New York session opening soon",
-                sessionBody(context, "America/New_York", 8, 0, "New York opens") +
-                    " US stocks open at 9:30 AM New York time."
-            )
-            AlertScheduler.T_ASIA -> Notifs.show(
-                context, Notifs.CH_SESSION, 7103,
-                "Asia session opening soon",
-                sessionBody(context, "Asia/Tokyo", 9, 0, "Tokyo opens")
-            )
+            AlertScheduler.T_ASIA -> sessionAlert(context, 7103, "Asia (Tokyo)", "Asia/Tokyo", 9, 0, scheduledAt, "")
             AlertScheduler.T_NEWS -> Notifs.show(
                 context, Notifs.CH_NEWS, 7106 + (body.hashCode() and 0xFFFF),
                 title, body
@@ -92,16 +87,48 @@ class AlertReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun sessionBody(context: Context, zoneId: String, hour: Int, minute: Int, label: String): String {
+    /**
+     * The wording is worked out from the real clock, not assumed: if the
+     * phone delivered this alert late, it says the session already opened
+     * (and how long ago) instead of claiming "in about 10 min".
+     */
+    private fun sessionAlert(
+        context: Context, notifId: Int, name: String, zoneId: String, hour: Int, minute: Int,
+        scheduledAt: Long, suffix: String
+    ) {
         val lead = AlertPrefs.sessionLead(context)
-        val zone = ZoneId.systemDefault()
         val ex = ZoneId.of(zoneId)
-        val open = ZonedDateTime.of(ZonedDateTime.now(ex).toLocalDate(), java.time.LocalTime.of(hour, minute), ex)
-            .withZoneSameInstant(zone)
-        val time = open.format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()))
-        val rules = TradingPlanStore.getRules(context)
-        val rulesNote = if (rules.isBlank()) "" else " Stick to your rules."
-        return "$label at $time your time (in about $lead min).$rulesNote"
+        val now = System.currentTimeMillis()
+        val openMs = if (scheduledAt > 0L) {
+            scheduledAt + lead * 60_000L
+        } else {
+            ZonedDateTime.of(ZonedDateTime.now(ex).toLocalDate(), java.time.LocalTime.of(hour, minute), ex)
+                .toInstant().toEpochMilli()
+        }
+        val timeText = java.time.Instant.ofEpochMilli(openMs).atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()))
+        val minsToOpen = Math.round((openMs - now) / 60_000.0).toInt()
+        val rulesNote = if (TradingPlanStore.getRules(context).isBlank()) "" else " Stick to your rules."
+
+        val title: String
+        val body: String
+        when {
+            minsToOpen >= 2 -> {
+                title = "$name session opening soon"
+                body = "$name opens at $timeText your time (in about $minsToOpen min).$suffix$rulesNote"
+            }
+            minsToOpen in -1..1 -> {
+                title = "$name session is opening now"
+                body = "$name opens at $timeText your time.$suffix$rulesNote"
+            }
+            else -> {
+                val ago = -minsToOpen
+                title = "$name session already open"
+                body = "$name opened at $timeText your time, $ago min ago. " +
+                    "(This alert reached you late - your phone delayed it.)$suffix$rulesNote"
+            }
+        }
+        Notifs.show(context, Notifs.CH_SESSION, notifId, title, body)
     }
 
     private fun journalPrompt(context: Context): String {

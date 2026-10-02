@@ -32,6 +32,7 @@ object AlertScheduler {
     const val EXTRA_TYPE = "alert_type"
     const val EXTRA_TITLE = "alert_title"
     const val EXTRA_BODY = "alert_body"
+    const val EXTRA_SCHEDULED = "alert_scheduled_at"
 
     const val T_LONDON = "london"
     const val T_NY = "ny"
@@ -51,11 +52,12 @@ object AlertScheduler {
     private const val SWEEP_HOUR = 5
     private const val SWEEP_THROTTLE_MS = 3 * 60 * 60 * 1000L
 
-    private fun pending(context: Context, requestCode: Int, type: String, title: String = "", body: String = ""): PendingIntent {
+    private fun pending(context: Context, requestCode: Int, type: String, title: String = "", body: String = "", scheduledAt: Long = 0L): PendingIntent {
         val intent = Intent(context, AlertReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, type)
             putExtra(EXTRA_TITLE, title)
             putExtra(EXTRA_BODY, body)
+            putExtra(EXTRA_SCHEDULED, scheduledAt)
         }
         return PendingIntent.getBroadcast(
             context, requestCode, intent,
@@ -125,7 +127,7 @@ object AlertScheduler {
     private fun scheduleSession(context: Context, type: String, rc: Int, key: String, zoneId: String, hour: Int, minute: Int) {
         if (!AlertPrefs.isOn(context, key)) { cancel(context, rc, type); return }
         val fireAt = nextSessionFire(zoneId, hour, minute, AlertPrefs.sessionLead(context), Instant.now())
-        setReliableAlarm(context, fireAt.toEpochMilli(), pending(context, rc, type))
+        setReliableAlarm(context, fireAt.toEpochMilli(), pending(context, rc, type, scheduledAt = fireAt.toEpochMilli()))
     }
 
     /** Next weekday session open (in the exchange's own zone), minus the lead time. */
@@ -149,7 +151,7 @@ object AlertScheduler {
         val now = ZonedDateTime.now(zone)
         var target = now.withHour(minutesOfDay / 60).withMinute(minutesOfDay % 60).withSecond(0).withNano(0)
         if (!target.isAfter(now.plusSeconds(5))) target = target.plusDays(1)
-        setReliableAlarm(context, target.toInstant().toEpochMilli(), pending(context, rc, type))
+        setReliableAlarm(context, target.toInstant().toEpochMilli(), pending(context, rc, type, scheduledAt = target.toInstant().toEpochMilli()))
     }
 
     // ---- news -------------------------------------------------------
@@ -195,7 +197,7 @@ object AlertScheduler {
             val title = "High-impact news in ${AlertPrefs.newsLead(app)} min"
             val body = "${e.country} ${e.title} at ${tf.format(java.util.Date(e.timeMillis))}. " +
                 "Expect volatility - check your open trades and stops."
-            setReliableAlarm(app, e.timeMillis - leadMs, pending(app, code, T_NEWS, title, body))
+            setReliableAlarm(app, e.timeMillis - leadMs, pending(app, code, T_NEWS, title, body, scheduledAt = e.timeMillis - leadMs))
             codes.add(code)
         }
         AlertPrefs.setString(app, AlertPrefs.K_NEWS_CODES, codes.joinToString(","))

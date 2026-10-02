@@ -108,7 +108,7 @@ object BriefingBuilder {
         // ---- headlines
         if (!headlines.isNullOrEmpty()) {
             sb.append("\nHeadlines:\n")
-            headlines.forEach { sb.append("- $it\n") }
+            for (h in headlines) sb.append("- $h\n")
         }
 
         // ---- your own rules and plan

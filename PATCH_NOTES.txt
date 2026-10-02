@@ -1,24 +1,24 @@
-VINCE MOBILE 2.1 - big round: vision fix, alerts, briefing, reminders, images, trade card
-==========================================================================================
-Extract into your project folder (overwrite). Confirm app/debug.keystore exists.
+VINCE MOBILE 2.2 - alert timing fix + phone actions (contains everything from 2.1 too)
+=====================================================================================
+Extract into your project folder and overwrite. app/debug.keystore is the SAME key as 2.1
+- do not replace or regenerate it, or the next install will refuse to update over the old one.
 
-FIRST INSTALL OF THIS BUILD NEEDS ONE LAST UNINSTALL (old builds were signed with a random
-key each time). Before uninstalling: Settings > Backup. API keys and PIN are not in the
-backup - copy your keys somewhere first. After this build, updates install over the top.
+NEW IN 2.2
+- Session alerts now work out their wording from the real clock. If the phone delivers an alert
+  late, it says "session already open, N min ago" instead of claiming "in about 10 min".
+- Settings > Alerts: "Recent alerts (due vs arrived)" shows how late each alert was, plus
+  battery-optimization status. Use it to see whether lateness is consistent.
+- Phone actions (no special access needed): flashlight on/off, volume up/down/mute/set %,
+  music play/pause/next/previous, battery level, dial a number, prefilled SMS and WhatsApp
+  drafts, shortcuts into Wi-Fi / Bluetooth / battery / display / sound / airplane / location
+  settings, "turn on/off wifi|bluetooth|mobile data|airplane mode" (opens the switch).
+- Personas know about the new actions.
 
-1. VISION: Gemini retries 503 and falls through to other flash models; Groq model is found
-   live (old llama-4-scout was shut down); OpenRouter tries several free vision models.
-   Errors are short and readable, not saved to chat, not spoken.
-2. ALERTS (Settings > Alerts and briefings): London / New York / Asia open, high-impact
-   news heads-up, daily briefing, journal check-in. Each has its own switch.
-3. BRIEFING: sessions in your time, today's high-impact news, headlines (needs Tavily key),
-   your rules and today's plan. Say "briefing" in chat for it on demand.
-4. RULES / PLAN: "my rules: ...", "today's plan: ...", "show my rules", "clear today's plan".
-5. REMINDERS back: "remind me at 3pm to ...", "remind me in 20 minutes to ...",
-   "list my reminders", "cancel my reminders". Re-armed on app open and after reboot.
-6. GREETING: time-of-day greeting only at the start of a conversation (or after 6h quiet).
-7. IMAGES: "generate an image of ..." with Copy / Save / Share buttons.
-8. TRADE-IDEA CARD under chart analyses (entry, stop, target, R:R calculated in code).
-9. PHONE ACTIONS: "open tradingview.com", "google ...", "set a timer for 10 minutes",
-   "navigate to ...".
-10. Personas now know what the app can and can't do.
+PHRASES
+  flashlight on | flashlight off | torch
+  volume up | volume down | louder | quieter | mute | unmute | volume 40
+  pause music | play music | next song | previous song
+  battery | what's my battery level
+  call 0712345678 | text 0712345678 saying running late | whatsapp 0712345678 saying hi
+  open wifi settings | turn on bluetooth | turn off wifi
+  set a timer for 10 minutes | set a 10 minute timer

@@ -104,6 +104,7 @@ object AlertScheduler {
         scheduleDaily(app, T_JOURNAL, RC_JOURNAL, AlertPrefs.K_JOURNAL, AlertPrefs.journalMinutes(app))
         scheduleSweepAlarm(app)
         ReminderScheduler.rearmAll(app)
+        ReminderGuardService.sync(app)
         // The news sweep needs the network, so it runs off the main thread (throttled).
         CoroutineScope(Dispatchers.IO).launch {
             try { runNewsSweep(app, force = forceNews) } catch (e: Exception) { /* best-effort */ }

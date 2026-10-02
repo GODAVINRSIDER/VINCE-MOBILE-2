@@ -17,7 +17,7 @@ object Notifs {
     const val CH_NEWS = "vince_news"
     const val CH_BRIEFING = "vince_briefing"
     const val CH_JOURNAL = "vince_journal"
-    const val CH_REMINDER = "vince_reminders"
+    const val CH_REMINDER = "vince_reminders_v2"
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -26,7 +26,19 @@ object Notifs {
         nm.createNotificationChannel(NotificationChannel(CH_NEWS, "News heads-up", NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel(CH_BRIEFING, "Daily briefing", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_JOURNAL, "Journal check-in", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CH_REMINDER, "VINCE Reminders", NotificationManager.IMPORTANCE_HIGH))
+        val reminderCh = NotificationChannel(CH_REMINDER, "VINCE Reminders", NotificationManager.IMPORTANCE_HIGH).apply {
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
+            setSound(
+                android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+        }
+        nm.createNotificationChannel(reminderCh)
     }
 
     fun show(

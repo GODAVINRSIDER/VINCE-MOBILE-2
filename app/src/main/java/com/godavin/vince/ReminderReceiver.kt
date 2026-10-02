@@ -19,45 +19,6 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = ReminderScheduler.extractId(intent)
         val message = ReminderScheduler.extractMessage(intent)
-
-        showNotification(context, id, message)
-        if (id != -1) {
-            ReminderStore.remove(context, id)
-        }
-    }
-
-    private fun showNotification(context: Context, id: Int, message: String) {
-        val channelId = "vince_reminders"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId, "VINCE Reminders", NotificationManager.IMPORTANCE_HIGH
-            )
-            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                .createNotificationChannel(channel)
-        }
-
-        val openAppIntent = Intent(context, MainActivity::class.java)
-        val contentPendingIntent = PendingIntent.getActivity(
-            context, id, openAppIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, channelId)
-            .setContentTitle("VINCE")
-            .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
-            .setContentIntent(contentPendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
-
-        // If POST_NOTIFICATIONS was never granted (Android 13+), this
-        // silently does nothing rather than crashing - same "never let a
-        // nice-to-have fail loudly" discipline as the rest of the app.
-        try {
-            NotificationManagerCompat.from(context).notify(id, notification)
-        } catch (e: SecurityException) {
-            // permission not granted - nothing more to do here
-        }
+        ReminderFirer.fire(context, id, message, "alarm")
     }
 }

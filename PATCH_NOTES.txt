@@ -1,24 +1,35 @@
-VINCE MOBILE 2.2 - alert timing fix + phone actions (contains everything from 2.1 too)
-=====================================================================================
-Extract into your project folder and overwrite. app/debug.keystore is the SAME key as 2.1
-- do not replace or regenerate it, or the next install will refuse to update over the old one.
+VINCE MOBILE 2.3 - forced live search, continuous voice, image + candle drawing, guarded reminders
+===============================================================================================
+Extract into your project folder and overwrite. app/debug.keystore is the SAME key as before
+- do not replace it. versionCode 4 / versionName 2.3-phone.
 
-NEW IN 2.2
-- Session alerts now work out their wording from the real clock. If the phone delivers an alert
-  late, it says "session already open, N min ago" instead of claiming "in about 10 min".
-- Settings > Alerts: "Recent alerts (due vs arrived)" shows how late each alert was, plus
-  battery-optimization status. Use it to see whether lateness is consistent.
-- Phone actions (no special access needed): flashlight on/off, volume up/down/mute/set %,
-  music play/pause/next/previous, battery level, dial a number, prefilled SMS and WhatsApp
-  drafts, shortcuts into Wi-Fi / Bluetooth / battery / display / sound / airplane / location
-  settings, "turn on/off wifi|bluetooth|mobile data|airplane mode" (opens the switch).
-- Personas know about the new actions.
-
-PHRASES
-  flashlight on | flashlight off | torch
-  volume up | volume down | louder | quieter | mute | unmute | volume 40
-  pause music | play music | next song | previous song
-  battery | what's my battery level
-  call 0712345678 | text 0712345678 saying running late | whatsapp 0712345678 saying hi
-  open wifi settings | turn on bluetooth | turn off wifi
-  set a timer for 10 minutes | set a 10 minute timer
+NEW IN 2.3
+1. FORCED LIVE SEARCH (Tavily). The model no longer decides whether to search.
+   - Words like search, look up, research, latest, current, now, today, news, update, outlook,
+     forecast, price of... ALWAYS search.
+   - Every real question, "analyze/give me/explain..." request, or message of 5+ words also
+     searches. Only tiny small talk (hi, ok, thanks) and local commands (time, reminders, phone
+     actions) skip it.
+   - Short follow-ups ("and silver?") are glued to your previous message so the search has a subject.
+   - Prompts rewritten: no more mention of training data / knowledge cutoff, no 2024-and-earlier
+     history unless you ask. If search fails it says "couldn't pull live data" instead of guessing.
+2. CONTINUOUS VOICE (in the app AND the floating widget). Tap once; it listens, answers, listens
+   again. Ends on "end convo", "I'm done", "that's all", "stop listening", "goodbye", a tap on the
+   mic/widget, or 3 minutes of silence (it says it is going on standby). Works on the speaker or
+   with earphones. You can cut in while it talks (say "stop"/"wait" or just start your question);
+   chat also has Interrupt and a Cut-in on/off chip. On loud speaker some phones echo, so use the
+   chip if it ever interrupts itself.
+3. IMAGES. Shows which provider made the picture and why better ones were skipped. Your prompt is
+   first rewritten into a detailed one. Looser wording is recognised ("I want an image of...",
+   "show me a picture of...", "make me a logo for...").
+4. CANDLE + SMC DRAWER (drawn by code, always accurate): morning/evening star, bullish/bearish
+   engulfing, hammer, hanging man, shooting star, inverted hammer, doji (+dragonfly, gravestone),
+   three white soldiers, three black crows, harami, piercing line, dark cloud cover, tweezer
+   top/bottom, marubozu, spinning top, FVG, order block, BOS, CHoCH, liquidity sweep.
+   Say e.g. "draw a bearish engulfing" or "show me a bullish FVG".
+5. REMINDERS NOW FIRE IN THE BACKGROUND. Two independent delivery paths (alarm + a silent
+   background guard service); whichever fires first delivers, no duplicates. Louder alarm-style
+   channel. Settings > Alerts: "Keep VINCE awake in background" (on by default) and an
+   "Autostart page" button that opens your phone maker's autostart screen.
+   PHONE SETUP STILL NEEDED ONCE: Autostart ON for VINCE, Battery = No restrictions, lock VINCE
+   in recent apps. No app can override a phone that force-stops it.

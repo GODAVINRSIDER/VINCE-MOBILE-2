@@ -54,6 +54,7 @@ fun AlertsSection() {
     var briefing by remember { mutableStateOf(AlertPrefs.isOn(context, AlertPrefs.K_BRIEFING)) }
     var journal by remember { mutableStateOf(AlertPrefs.isOn(context, AlertPrefs.K_JOURNAL)) }
     var reliable by remember { mutableStateOf(AlertPrefs.isOn(context, AlertPrefs.K_RELIABLE)) }
+    var guard by remember { mutableStateOf(AlertPrefs.isOn(context, AlertPrefs.K_GUARD)) }
     var briefingMin by remember { mutableStateOf(AlertPrefs.briefingMinutes(context)) }
     var journalMin by remember { mutableStateOf(AlertPrefs.journalMinutes(context)) }
     var sessionLead by remember { mutableStateOf(AlertPrefs.sessionLead(context)) }
@@ -171,6 +172,15 @@ fun AlertsSection() {
     AlertSwitchRow("Reliable mode", "Uses alarm-clock alarms that skip battery batching (shows a small alarm icon)", reliable) {
         reliable = it; toggle(AlertPrefs.K_RELIABLE, it)
     }
+    AlertSwitchRow(
+        "Keep VINCE awake in background",
+        "A tiny silent service so reminders and alerts fire on time with the app closed (adds one silent notification)",
+        guard
+    ) {
+        guard = it
+        AlertPrefs.setOn(context, AlertPrefs.K_GUARD, it)
+        ReminderGuardService.sync(context)
+    }
     Text(
         if (exactOk) "Exact alarms: allowed" else "Exact alarms: NOT allowed - alerts can arrive late",
         fontSize = 12.sp,
@@ -213,6 +223,9 @@ fun AlertsSection() {
                 )
             } catch (e: Exception) { /* nothing to open */ }
         }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("App settings", fontSize = 12.sp) }
+        OutlinedButton(onClick = {
+            BackgroundHelp.openAutostart(context)
+        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Autostart page", fontSize = 12.sp) }
         OutlinedButton(onClick = {
             try {
                 context.startActivity(

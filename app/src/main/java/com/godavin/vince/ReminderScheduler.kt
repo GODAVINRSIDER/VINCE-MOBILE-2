@@ -59,6 +59,8 @@ object ReminderScheduler {
         // alarm, exempt from Doze batching) instead of a plain exact alarm,
         // which is the weakest type on aggressive OEM battery managers.
         AlertScheduler.setReliableAlarm(context, fireAtMillis, pendingIntentFor(context, id, message))
+        // Second delivery path + keep-alive, so the reminder does not depend on the alarm alone.
+        ReminderGuardService.sync(context)
         return true
     }
 
@@ -74,8 +76,19 @@ object ReminderScheduler {
             if (r.fireAtMillis > now + 1000) {
                 AlertScheduler.setReliableAlarm(context, r.fireAtMillis, pendingIntentFor(context, r.id, r.message))
             } else {
-                Notifs.show(context, Notifs.CH_REMINDER, r.id, "VINCE (missed reminder)", r.message)
-                ReminderStore.remove(context, r.id)
+                if (ReminderStore.take(context, r.id) != null) {
+                    Notifs.show(context, Notifs.CH_REMINDER, r.id, "VINCE (missed reminder)", r.message)
+                }
+            }
+        }
+    }
+
+    /** Re-arms only reminders still in the future (never shows anything). */
+    fun rearmFuture(context: Context) {
+        val now = System.currentTimeMillis()
+        for (r in ReminderStore.getAll(context)) {
+            if (r.fireAtMillis > now + 1000) {
+                AlertScheduler.setReliableAlarm(context, r.fireAtMillis, pendingIntentFor(context, r.id, r.message))
             }
         }
     }
@@ -83,6 +96,8 @@ object ReminderScheduler {
     fun cancel(context: Context, id: Int, message: String) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarmManager.cancel(pendingIntentFor(context, id, message))
+        // The caller removes the reminder from the store right after; the guard
+        // re-checks on its next tick and stops itself if nothing is left.
     }
 
     fun extractId(intent: Intent): Int = intent.getIntExtra(EXTRA_ID, -1)

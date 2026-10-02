@@ -48,6 +48,8 @@ object AlertLog {
         AlertScheduler.T_LONDON -> "London"
         AlertScheduler.T_NY -> "New York"
         AlertScheduler.T_ASIA -> "Asia"
+        "reminder_alarm" -> "Reminder (alarm)"
+        "reminder_guard" -> "Reminder (guard)"
         AlertScheduler.T_BRIEFING -> "Briefing"
         AlertScheduler.T_JOURNAL -> "Journal"
         AlertScheduler.T_NEWS -> "News"

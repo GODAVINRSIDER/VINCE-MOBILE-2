@@ -68,6 +68,8 @@ private const val DEFAULT_VISION_PROMPT = "Look at this image and describe what 
     "stay flexible to whatever the image actually is, don't force a chart-analysis framing " +
     "onto something that isn't one."
 
+private data class GeneratedImage(val path: String, val caption: String)
+
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -240,16 +242,23 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             // memory/reminder commands, then fall through to the AI.
             // Image generation ("generate an image of ...") - checked first,
             // since it needs the network and a longer wait than any local command.
-            val imagePrompt = ImageCommands.extractPrompt(text)
-            if (imagePrompt != null) {
-                val genResult = ImageGenerator.generate(context, imagePrompt)
+            // Chart patterns (morning star, FVG, order block...) are DRAWN by code so
+            // they are always accurate; everything else goes to the image models.
+            val patternDrawing = CandleChart.tryDraw(context, text)
+            val imagePrompt = if (patternDrawing == null) ImageCommands.extractPrompt(text) else null
+            if (patternDrawing != null || imagePrompt != null) {
+                val genResult: Result<GeneratedImage> = if (patternDrawing != null) {
+                    Result.success(GeneratedImage(patternDrawing.path, patternDrawing.caption))
+                } else {
+                    ImageGenerator.generate(context, imagePrompt!!).map { GeneratedImage(it.path, it.summary()) }
+                }
                 val genMsg = genResult.fold(
-                    onSuccess = { path ->
+                    onSuccess = { img ->
                         ChatMessage(
                             fromUser = false,
-                            text = "Here's your image. Use Copy, Save or Share under it.",
+                            text = img.caption,
                             persona = activePersona.name,
-                            imagePath = path
+                            imagePath = img.path
                         )
                     },
                     onFailure = { e ->
@@ -309,37 +318,69 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     // SpeechRecognizer directly with zero system UI. Matches that same
     // treatment here: no popup, just a colored halo around the mic
     // button (see the action row below) while actively listening.
-    var isListening by remember { mutableStateOf(false) }
+    // v2.3 - continuous Jarvis-style voice conversation (see VoiceSession.kt).
+    // One tap starts it; it keeps listening after every reply until the user says
+    // "end convo" / "I'm done", taps the mic again, or 3 minutes pass in silence.
+    val voicePhase = VoiceSession.phase
+    val isListening = voicePhase != VoiceSession.Phase.OFF && VoiceSession.owner == "chat"
+    var bargeIn by remember { mutableStateOf(VoiceSession.bargeInEnabled(context)) }
+
+    // Runs one spoken turn through the exact same pipeline as typing, then hands
+    // the reply text back so VoiceSession can speak it and listen again.
+    suspend fun voiceTurn(spoken: String): String? {
+        val historySnapshot = messages.toList()
+        val userMsg = ChatMessage(fromUser = true, text = spoken)
+        messages.add(userMsg)
+        ConversationStore.addMessage(context, threadId, userMsg)
+        sending = true
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+
+        val imagePrompt0 = CandleChart.tryDraw(context, spoken)
+        val imagePrompt = if (imagePrompt0 == null) ImageCommands.extractPrompt(spoken) else null
+        val replyMsg: ChatMessage
+        var speech: String
+        if (imagePrompt0 != null) {
+            replyMsg = ChatMessage(fromUser = false, text = imagePrompt0.caption, persona = activePersona.name, imagePath = imagePrompt0.path)
+            speech = "Here's your drawing."
+        } else if (imagePrompt != null) {
+            val r = ImageGenerator.generate(context, imagePrompt)
+            replyMsg = r.fold(
+                onSuccess = { ChatMessage(fromUser = false, text = it.summary(), persona = activePersona.name, imagePath = it.path) },
+                onFailure = { ChatMessage(fromUser = false, text = it.message ?: "Couldn't generate the image.", persona = activePersona.name) }
+            )
+            speech = if (replyMsg.imagePath != null) "Here's your image." else "I couldn't generate that image right now."
+        } else {
+            val localReply = RealTimeTools.handleLocalCommand(context, spoken)
+                ?: PersonalTools.handleLocalCommand(context, spoken)
+            val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona, historySnapshot)
+            replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+            speech = TradeIdea.stripForSpeech(reply)
+        }
+        messages.add(replyMsg)
+        if (replyMsg.imagePath != null || imagePrompt == null) {
+            ConversationStore.addMessage(context, threadId, replyMsg)
+        }
+        ActivityLog.addEvent(context, "Voice chat with ${activePersona.displayName}")
+        sending = false
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+        return if (speakReplies) speech else null
+    }
 
     fun startListening() {
-        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
+        if (VoiceSession.active) {
+            VoiceSession.stop()
             return
         }
-        isListening = true
-        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
-        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
-            override fun onResults(results: android.os.Bundle?) {
-                isListening = false
-                val spoken = results
-                    ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                if (!spoken.isNullOrBlank()) send(overrideText = spoken)
-                recognizer.destroy()
-            }
-            override fun onReadyForSpeech(params: android.os.Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { isListening = false }
-            override fun onError(error: Int) { isListening = false; recognizer.destroy() }
-            override fun onPartialResults(partialResults: android.os.Bundle?) {}
-            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-        })
-        recognizer.startListening(
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            }
-        )
+        VoiceSession.start(
+            context = context,
+            owner = "chat",
+            personaProvider = { activePersona }
+        ) { spoken -> voiceTurn(spoken) }
+    }
+
+    // Leaving the chat ends the session so the mic is never left open behind another screen.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { if (VoiceSession.owner == "chat") VoiceSession.stop() }
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -891,7 +932,31 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ChatActionButton(R.drawable.ic_action_mic, "Voice", activePersona.color(), enabled = !sending, highlighted = isListening) { onMicTapped() }
+                ChatActionButton(
+                    R.drawable.ic_action_mic,
+                    when (voicePhase) {
+                        VoiceSession.Phase.LISTENING -> "Listening"
+                        VoiceSession.Phase.THINKING -> "Thinking"
+                        VoiceSession.Phase.SPEAKING -> "Speaking"
+                        else -> "Voice"
+                    }.takeIf { isListening } ?: "Voice",
+                    activePersona.color(),
+                    enabled = true,
+                    highlighted = isListening
+                ) { onMicTapped() }
+                if (isListening && voicePhase == VoiceSession.Phase.SPEAKING) {
+                    ChatActionButton(R.drawable.ic_action_mic, "Interrupt", activePersona.color(), enabled = true) { VoiceSession.interruptSpeech() }
+                }
+                if (isListening) {
+                    ChatActionButton(
+                        R.drawable.ic_action_mic,
+                        if (bargeIn) "Cut-in on" else "Cut-in off",
+                        activePersona.color(), enabled = true
+                    ) {
+                        bargeIn = !bargeIn
+                        VoiceSession.setBargeIn(context, bargeIn)
+                    }
+                }
                 ChatActionButton(R.drawable.ic_action_camera, "Camera", activePersona.color(), enabled = !sending) { onCameraTapped() }
                 ChatActionButton(R.drawable.ic_action_screen, "Screen", activePersona.color(), enabled = !sending) { onScreenTapped() }
                 ChatActionButton(R.drawable.ic_action_image, "Files", activePersona.color(), enabled = !sending) { onUploadTapped() }
@@ -958,7 +1023,7 @@ private fun ChatActionButton(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            if (highlighted) "Listening..." else label,
+            label,
             fontSize = 10.sp,
             color = if (enabled) tint else tint.copy(alpha = 0.4f)
         )

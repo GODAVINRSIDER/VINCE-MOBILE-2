@@ -2,7 +2,10 @@ package com.godavin.vince
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 /**
@@ -29,6 +32,21 @@ object VoiceOutput {
     private var defaultVoice: Voice? = null
     private var vinceVoice: Voice? = null
 
+    // v2.3 - lets the continuous voice session wait until VINCE has actually
+    // finished talking (or was cut off) before listening again.
+    @Volatile private var pending: CompletableDeferred<Unit>? = null
+    private var utteranceCounter = 0
+
+    val isSpeaking: Boolean get() = tts?.isSpeaking == true
+
+    @Volatile private var pendingId: String? = null
+
+    /** [id] null = force-complete (used by stop()). Otherwise only the utterance
+     * we are waiting on may complete it, so a flushed older utterance cannot. */
+    private fun finishPending(id: String? = null) {
+        if (id == null || id == pendingId) pending?.complete(Unit)
+    }
+
     fun init(context: Context) {
         if (tts != null) return
         tts = TextToSpeech(context.applicationContext) { status ->
@@ -36,6 +54,14 @@ object VoiceOutput {
                 tts?.language = Locale.US
                 defaultVoice = tts?.voice
                 vinceVoice = tts?.voices?.find { it.name == VINCE_VOICE_NAME }
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) { finishPending(utteranceId) }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) { finishPending(utteranceId) }
+                    override fun onError(utteranceId: String?, errorCode: Int) { finishPending(utteranceId) }
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) { finishPending(utteranceId) }
+                })
                 ready = true
             }
         }
@@ -66,7 +92,22 @@ object VoiceOutput {
             tts?.setSpeechRate(persona.rate)
         }
 
-        tts?.speak(stripMarkdownForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, null)
+        // The engine rejects input over ~4000 characters outright.
+        val clean = stripMarkdownForSpeech(text).take(3900)
+        utteranceCounter++
+        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "vince_utt_$utteranceCounter")
+    }
+
+    /** Speaks and suspends until the speech ends, is interrupted, or a safety
+     * timeout passes. Used by the continuous voice session. */
+    suspend fun speakAwait(text: String, persona: Persona = Persona.VINCE) {
+        if (!ready || text.isBlank()) return
+        val d = CompletableDeferred<Unit>()
+        pendingId = "vince_utt_${utteranceCounter + 1}"
+        pending = d
+        speak(text, persona)
+        withTimeoutOrNull(maxOf(10_000L, text.length * 110L)) { d.await() }
+        if (pending === d) pending = null
     }
 
     /** Cleans text before handing it to the speech engine - TTS has no
@@ -105,5 +146,6 @@ object VoiceOutput {
 
     fun stop() {
         tts?.stop()
+        finishPending()
     }
 }

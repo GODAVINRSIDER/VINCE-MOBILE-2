@@ -63,6 +63,16 @@ object ReminderStore {
         return id
     }
 
+    /** Atomically removes and returns the reminder, or null if it is already gone.
+     * Whichever delivery path takes it first is the one that notifies. */
+    @Synchronized
+    fun take(context: Context, id: Int): Reminder? {
+        val found = getAll(context).firstOrNull { it.id == id } ?: return null
+        remove(context, id)
+        return found
+    }
+
+    @Synchronized
     fun remove(context: Context, id: Int) {
         val arr = load(context)
         val rebuilt = JSONArray()

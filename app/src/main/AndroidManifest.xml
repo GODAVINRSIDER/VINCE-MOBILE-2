@@ -120,6 +120,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- v2.3 - background guard: keeps reminders on time (second delivery path). -->
+        <service
+            android:name=".ReminderGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="reminder_and_alert_background_guard" />
+        </service>
+
         <!-- Stage 15 - floating overlay mic service. specialUse is the
              generic Android 14+ foreground-service type for services that
              don't fit the predefined categories (mediaProjection, camera,

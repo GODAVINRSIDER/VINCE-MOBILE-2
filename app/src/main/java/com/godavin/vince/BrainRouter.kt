@@ -35,6 +35,15 @@ object BrainRouter {
             "chat bubble with no Markdown rendering - write in plain natural sentences " +
             "instead, using line breaks for separate points if needed."
 
+    // v2.3 - the user is a working trader: everything is about NOW. Stops the
+    // personas dwelling on training cutoffs or dragging in 2024-and-earlier history.
+    private const val NOW_ONLY_RULE =
+        "Core rule: you are advising a working trader in the present moment. Never mention " +
+            "your training data, knowledge cutoff, or lack of real-time access. Do not bring up " +
+            "events, years or market conditions from 2024 or earlier unless the user explicitly " +
+            "asks for history. Frame all advice, guidance and examples for today and what is " +
+            "practical now."
+
     // Capabilities awareness - the personas were describing themselves as
     // "text-only" with no device access, because nothing in the prompt told
     // them what the app can actually do. Keep this list TRUTHFUL: update it
@@ -54,7 +63,7 @@ object BrainRouter {
             "news heads-ups, a daily briefing and an end-of-day journal check-in, keep the " +
             "user's trading rules and today's plan, search the web and run multi-step " +
             "research (when a search key is set), remember facts across every chat, float " +
-            "as a widget over other apps, and make in-app calls to PC-VINCE. You cannot " +
+            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, and make in-app calls to PC-VINCE. You cannot " +
             "place or manage trades from the phone, you are not linked to any trading " +
             "account (so you do not know balance, open trades or profit), you cannot place " +
             "calls or send messages by yourself (the user presses the button), cannot flip " +
@@ -131,8 +140,8 @@ object BrainRouter {
             else -> "late night"
         }
         return "The real current date is ${fmt.format(java.util.Date())} - treat this as fact " +
-            "regardless of what your own training data suggests the current date/year is, " +
-            "since your training has a cutoff and this is the phone's actual live clock. " +
+            "and it comes from the phone's live clock, so anything you say about 'now', " +
+            "'this year' or 'recent' is relative to it. " +
             "It's currently $timeOfDay where the user is. " + greetingRule(timeOfDay, mayGreet)
     }
 
@@ -224,91 +233,64 @@ object BrainRouter {
         // ones. At 1,000 free credits/month this isn't a real limit at
         // your current usage - if it ever needs narrowing back down,
         // that's a one-line change here.
-        val keywordSearchNeeded = WebSearchTool.needsSearch(userMessage)
-        val searchNeeded = keywordSearchNeeded ||
-            (tavilyKey.isNotBlank() && WebSearchTool.looksLikeQuestion(userMessage))
+        // v2.3 - FORCED SEARCH. The model never decides whether to search.
+        // forced = the message contains a search/recency word (search, look up,
+        // latest, current, today, news, outlook...). wide = any real question or
+        // substantive request. Only tiny small talk skips Tavily. Local commands
+        // (time, reminders, phone actions) never reach this function at all.
+        val forced = WebSearchTool.mustSearch(userMessage)
+        val searchNeeded = forced || WebSearchTool.shouldSearch(userMessage)
+        val timeSensitive = forced || WebSearchTool.needsSearch(userMessage)
 
-        // Fix - the old grounding text ("use these instead of relying on
-        // your training data") was a suggestion, not an instruction, so
-        // the model could still blend in stale facts it "remembered"
-        // alongside real search results (e.g. an old promo code mixed in
-        // with current ones). This version explicitly tells it search
-        // results OVERRIDE conflicting training-data recall, and now also
-        // spells out how to read the [published: ...] date tag on each
-        // result - so if an older result still slips through, the model
-        // weighs it as stale instead of treating every result as equally
-        // current.
-        fun groundingPrefix(label: String) =
-            "Real, $label web search results for this question, fetched just now - these are " +
-                "ground truth. Each result is tagged with its actual publish date where known - " +
-                "pay attention to those dates: a result published years ago does NOT override a " +
-                "more recently published one, and if the most recent result already answers the " +
-                "question, that is the answer, even if it contradicts an older result or your " +
-                "own training-data recall. Do NOT blend in an older version of events you recall " +
-                "independently when these results (especially the most recent ones) say " +
-                "otherwise:\n"
+        fun groundingPrefix() =
+            "LIVE WEB RESULTS, fetched seconds ago. This is the newest information available and " +
+                "it is the truth about the world right now. Each result is tagged with its publish " +
+                "date when known; when results disagree, the most recently published one wins. " +
+                "Build your answer from these. Never contradict them from memory. Never mention " +
+                "training data, a knowledge cutoff or what you 'used to know'. Speak like someone " +
+                "who is fully up to date, and give practical guidance for today, not for some past " +
+                "year:\n"
+
+        val searchQuery = WebSearchTool.buildQuery(userMessage, history)
+        val recencyDays = if (forced) 120 else SEARCH_RECENCY_DAYS
 
         var relaxConciseness = false
         val searchBlock = if (tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
             val deepResult = DeepResearch.research(context, userMessage)
             if (deepResult != null) {
                 relaxConciseness = true
-                "Real, multi-angle web research results for this question (several searches " +
-                    "run across different angles of the topic - these are ground truth, trust " +
-                    "them over conflicting training-data recall - synthesize a genuinely " +
-                    "thorough answer from these, since a real research request deserves " +
-                    "more than a one-paragraph summary; use headings/sections in plain text " +
-                    "if that helps organize it, still no Markdown symbols):\n$deepResult"
-            } else if (searchNeeded) {
-                WebSearchTool.search(
-                    tavilyKey, userMessage, topic = "news", days = SEARCH_RECENCY_DAYS
-                ).getOrNull()?.takeIf { it.isNotBlank() }?.let {
-                    groundingPrefix("current") + it
-                } ?: ""
+                "LIVE multi-angle web research, fetched seconds ago (several searches across " +
+                    "different angles). This is the truth about the world right now; trust it over " +
+                    "anything you recall, never mention training data or a cutoff, and synthesize a " +
+                    "genuinely thorough answer, since a real research request deserves more than a " +
+                    "one-paragraph summary. Use headings in plain text if that helps, still no " +
+                    "Markdown symbols:\n$deepResult"
             } else {
-                ""
+                WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays)
+                    .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
             }
         } else if (tavilyKey.isNotBlank() && searchNeeded) {
-            WebSearchTool.search(
-                tavilyKey, userMessage, topic = "news", days = SEARCH_RECENCY_DAYS
-            ).getOrNull()?.takeIf { it.isNotBlank() }?.let {
-                groundingPrefix("current") + it
-            } ?: ""
+            WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays)
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
         } else {
             ""
         }
 
-        // Fix - the actual bug that let "when did they meet recently?"
-        // (a message that MATCHED the keyword trigger list outright)
-        // still answer wrong with zero warning: this disclaimer used to
-        // only fire when searchAttempted was true, and searchAttempted
-        // was ONLY ever set inside a tavilyKey.isNotBlank() branch. So if
-        // no Tavily key is saved in Settings at all, search is skipped,
-        // searchAttempted silently stays false, and this disclaimer never
-        // fires either - VINCE fell straight through to a fully confident
-        // answer from frozen training data with no caveat whatsoever,
-        // regardless of how obviously the question needed a live check.
-        // Now this is driven by searchNeeded (whether the QUESTION needed
-        // a search) rather than by whether a key happened to be present,
-        // so a missing/failed key can no longer disable the safety net
-        // that's supposed to catch exactly this case.
-        val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank()) {
+        // Search was wanted but produced nothing (no key, network down, zero hits).
+        // Only matters for time-sensitive asks; never talks about "training data".
+        val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank() && timeSensitive) {
             if (tavilyKey.isBlank()) {
-                "This question is about something current/recent, but no web search is " +
-                    "configured at all right now (no Tavily API key saved in Settings) - do " +
-                    "NOT confidently state facts about current officeholders, recent events, " +
-                    "meetings, deaths, or anything that may have changed since your training " +
-                    "cutoff. Say plainly you have no way to confirm the latest without a live " +
-                    "search, and if useful, give your best training-data answer with a clear " +
-                    "caveat that it may be outdated, rather than stating it as settled fact."
+                "Live search is not set up (no Tavily key in Settings), so you could not pull live " +
+                    "data for this message. Do not state specific current facts (prices, levels, " +
+                    "who holds a post, latest events) as certain. Say in one short phrase that you " +
+                    "could not pull live data and that adding a Tavily key in Settings fixes it, then " +
+                    "help as far as you sensibly can. Never mention training data or a cutoff."
             } else {
-                "This question is about something current/recent, but the live web check just " +
-                    "now failed or timed out - do NOT confidently state facts about current " +
-                    "officeholders, recent events, meetings, deaths, or anything that may have " +
-                    "changed since your training cutoff. Say plainly you can't confirm the " +
-                    "latest right now and, if useful, give your best training-data answer with " +
-                    "a clear caveat that it may be outdated, rather than stating it as settled " +
-                    "fact."
+                "The live search for this message just failed or returned nothing. Do not state " +
+                    "specific current facts (prices, levels, who holds a post, latest events) as " +
+                    "certain. Say in one short phrase that you could not pull live data just now and " +
+                    "offer to try again, then help as far as you sensibly can. Never mention training " +
+                    "data or a cutoff."
             }
         } else {
             ""
@@ -325,8 +307,8 @@ object BrainRouter {
         }
 
         val contextBlock = listOf(
-            persona.roleDescription, CAPABILITIES_INSTRUCTION, styleInstruction, currentDateGrounding(mayGreet(history)),
-            memoryBlock, searchBlock, uncertaintyDisclaimer
+            persona.roleDescription, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, styleInstruction,
+            currentDateGrounding(mayGreet(history)), memoryBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }
             .joinToString(" ")

@@ -97,6 +97,7 @@ class OverlayService : Service() {
             try { windowManager.removeView(it) } catch (e: Exception) { /* already gone */ }
         }
         speechRecognizer?.destroy()
+        if (VoiceSession.owner == "widget") VoiceSession.stop()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -253,7 +254,7 @@ class OverlayService : Service() {
                         if (heldMillis >= 500) {
                             cyclePersona()
                         } else {
-                            startVoiceCommand()
+                            toggleVoiceSession()
                         }
                     }
                     true
@@ -296,57 +297,42 @@ class OverlayService : Service() {
         VoiceOutput.speak("${next.displayName} here.", next)
     }
 
-    private fun startVoiceCommand() {
-        val activePersona = PersonaState.getActive(applicationContext)
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            VoiceOutput.speak(
-                "Speech recognition isn't available on this device right now.",
-                activePersona
-            )
+    // v2.3 - tap starts a continuous conversation (listen, reply, listen again)
+    // that only ends on "end convo" / "I'm done" / 3 minutes of silence / another
+    // tap. Works on the phone speaker or with earphones.
+    private fun toggleVoiceSession() {
+        if (VoiceSession.active) {
+            VoiceSession.stop()
+            haloView?.visibility = View.INVISIBLE
             return
         }
-
-        setHaloColor(activePersona)
-        haloView?.visibility = View.VISIBLE
-
-        speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    haloView?.visibility = View.INVISIBLE
-                    val text = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                    if (!text.isNullOrBlank()) handleSpokenCommand(text)
-                }
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    haloView?.visibility = View.INVISIBLE
-                }
-                override fun onError(error: Int) {
-                    haloView?.visibility = View.INVISIBLE
-                }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        }
-        speechRecognizer?.startListening(intent)
-    }
-
-    private fun handleSpokenCommand(text: String) {
-        val persona = PersonaState.getActive(applicationContext)
-        serviceScope.launch {
+        val history = mutableListOf<ChatMessage>()
+        setHaloColor(PersonaState.getActive(applicationContext))
+        VoiceSession.start(
+            context = applicationContext,
+            owner = "widget",
+            personaProvider = { PersonaState.getActive(applicationContext) },
+            onPhase = { phase -> updateHalo(phase) }
+        ) { text ->
+            val persona = PersonaState.getActive(applicationContext)
+            setHaloColor(persona)
             val localReply = RealTimeTools.handleLocalCommand(applicationContext, text)
                 ?: PersonalTools.handleLocalCommand(applicationContext, text)
-            val reply = localReply ?: BrainRouter.sendMessage(applicationContext, text, persona)
-            VoiceOutput.speak(reply, persona)
+            val reply = localReply ?: BrainRouter.sendMessage(applicationContext, text, persona, history.toList())
+            history.add(ChatMessage(fromUser = true, text = text))
+            history.add(ChatMessage(fromUser = false, text = reply, persona = persona.name))
+            while (history.size > 40) history.removeAt(0)
+            TradeIdea.stripForSpeech(reply)
+        }
+    }
+
+    private fun updateHalo(phase: VoiceSession.Phase) {
+        val halo = haloView ?: return
+        when (phase) {
+            VoiceSession.Phase.OFF -> halo.visibility = View.INVISIBLE
+            VoiceSession.Phase.LISTENING -> { halo.visibility = View.VISIBLE; halo.alpha = 1f }
+            VoiceSession.Phase.THINKING -> { halo.visibility = View.VISIBLE; halo.alpha = 0.45f }
+            VoiceSession.Phase.SPEAKING -> { halo.visibility = View.VISIBLE; halo.alpha = 0.75f }
         }
     }
 }

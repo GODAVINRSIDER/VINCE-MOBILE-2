@@ -34,29 +34,82 @@ object ImageGenerator {
         .callTimeout(150, TimeUnit.SECONDS)
         .build()
 
-    /** Returns the saved image's absolute path on success. */
-    suspend fun generate(context: Context, prompt: String): Result<String> = withContext(Dispatchers.IO) {
+    /** v2.3 - says WHICH provider made the image and why better ones were skipped,
+     * so a silent fall-through to the weak keyless fallback is no longer invisible. */
+    data class ImageResult(val path: String, val provider: String, val notes: List<String>) {
+        fun summary(): String {
+            val head = "Here's your image (made with $provider). Use Copy, Save or Share under it."
+            return if (notes.isEmpty()) head
+            else head + "\nBetter models were skipped:\n" + notes.joinToString("\n") { "- " + it.take(140) }
+        }
+    }
+
+    /** Turns a casual request into a detailed visual prompt (one small text call).
+     * Falls back to the original wording if no text model answers. */
+    private suspend fun enhancePrompt(context: Context, userPrompt: String): String {
+        val ask = "Rewrite this as one detailed prompt for an AI image generator. Describe exactly what " +
+            "should be visible: subject, composition, lighting, colors, style. 40 to 70 words. " +
+            "No text or letters inside the image unless the request needs them. Output only the " +
+            "rewritten prompt, nothing else.\n\nRequest: $userPrompt"
+        return try {
+            val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+            val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
+            var out: String? = null
+            if (geminiKey.isNotBlank()) out = GeminiClient.sendMessage(geminiKey, ask).getOrNull()
+            if (out == null && groqKey.isNotBlank()) {
+                out = OpenAiCompatibleClient.sendMessage(
+                    baseUrl = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = groqKey,
+                    model = "openai/gpt-oss-120b",
+                    userMessage = ask,
+                    providerLabel = "Groq"
+                ).getOrNull()
+            }
+            val cleaned = out?.trim()?.trim('"')
+            if (cleaned != null && cleaned.length in 20..900) cleaned else userPrompt
+        } catch (e: Exception) {
+            userPrompt
+        }
+    }
+
+    suspend fun generate(context: Context, rawPrompt: String): Result<ImageResult> = withContext(Dispatchers.IO) {
         val attempts = mutableListOf<String>()
+        val prompt = enhancePrompt(context, rawPrompt)
 
         val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
         if (geminiKey.isNotBlank()) {
             val r = viaGemini(geminiKey, prompt)
             val bytes = r.getOrNull()
-            if (bytes != null) saveBytes(context, bytes)?.let { return@withContext Result.success(it) }
+            if (bytes != null) {
+                val path = saveBytes(context, bytes)
+                if (path != null) return@withContext Result.success(ImageResult(path, "Gemini", attempts))
+            }
             attempts.add("Gemini: ${r.exceptionOrNull()?.message ?: "returned no image"}")
+        } else {
+            attempts.add("Gemini: no key saved")
         }
 
         val orKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
         if (orKey.isNotBlank()) {
             val r = viaOpenRouter(orKey, prompt)
             val bytes = r.getOrNull()
-            if (bytes != null) saveBytes(context, bytes)?.let { return@withContext Result.success(it) }
+            if (bytes != null) {
+                val path = saveBytes(context, bytes)
+                if (path != null) return@withContext Result.success(ImageResult(path, "OpenRouter", attempts))
+            }
             attempts.add("OpenRouter: ${r.exceptionOrNull()?.message ?: "returned no image"}")
         }
 
         val r = viaPollinations(prompt)
         val bytes = r.getOrNull()
-        if (bytes != null) saveBytes(context, bytes)?.let { return@withContext Result.success(it) }
+        if (bytes != null) {
+            val path = saveBytes(context, bytes)
+            if (path != null) {
+                return@withContext Result.success(
+                    ImageResult(path, "Pollinations (basic free fallback, quality is limited)", attempts)
+                )
+            }
+        }
         attempts.add("Pollinations: ${r.exceptionOrNull()?.message ?: "returned no image"}")
 
         Result.failure(Exception(
@@ -223,41 +276,62 @@ object ImageGenerator {
     // ---------------- Pollinations (keyless fallback) ----------------
 
     private fun viaPollinations(prompt: String): Result<ByteArray> {
-        return try {
-            val encoded = URLEncoder.encode(prompt.take(500), "UTF-8").replace("+", "%20")
-            val req = Request.Builder()
-                .url("https://image.pollinations.ai/prompt/$encoded?width=1024&height=1024&nologo=true")
-                .addHeader("User-Agent", "Mozilla/5.0").get().build()
-            client.newCall(req).execute().use { resp ->
-                val ct = resp.header("Content-Type").orEmpty()
-                if (!resp.isSuccessful) return@use Result.failure<ByteArray>(Exception("error (${resp.code})"))
-                if (!ct.startsWith("image")) return@use Result.failure<ByteArray>(Exception("service didn't return an image"))
-                val bytes = resp.body?.bytes() ?: return@use Result.failure<ByteArray>(Exception("empty response"))
-                Result.success(bytes)
+        val encoded = URLEncoder.encode(prompt.take(700), "UTF-8").replace("+", "%20")
+        val seed = (System.currentTimeMillis() % 100000).toInt()
+        val urls = listOf(
+            "https://image.pollinations.ai/prompt/$encoded?width=1024&height=1024&nologo=true&model=flux&seed=$seed",
+            "https://image.pollinations.ai/prompt/$encoded?width=1024&height=1024&nologo=true&seed=$seed"
+        )
+        var last = "request failed"
+        for (url in urls) {
+            try {
+                val req = Request.Builder().url(url).addHeader("User-Agent", "Mozilla/5.0").get().build()
+                val got: ByteArray? = client.newCall(req).execute().use { resp ->
+                    val ct = resp.header("Content-Type").orEmpty()
+                    if (!resp.isSuccessful) {
+                        last = "error (${resp.code})"
+                        null
+                    } else if (!ct.startsWith("image")) {
+                        last = "service didn't return an image"
+                        null
+                    } else {
+                        resp.body?.bytes()
+                    }
+                }
+                if (got != null) return Result.success(got)
+            } catch (e: Exception) {
+                last = e.message?.take(80) ?: "request failed"
             }
-        } catch (e: Exception) {
-            Result.failure(Exception(e.message?.take(80) ?: "request failed"))
         }
+        return Result.failure(Exception(last))
     }
 }
 
-/** Recognises "generate an image of ..." style requests. Returns the image description, or null. */
+/** Recognises image requests in many phrasings. Returns the image description, or null. */
 object ImageCommands {
     private val OPTS = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
 
-    private val WITH_NOUN = Regex(
-        "^(?:please\\s+|can you\\s+|could you\\s+|vince[,]?\\s+|clara[,]?\\s+|davina[,]?\\s+)*" +
-            "(?:generate|create|make|produce|render|design)\\s+(?:me\\s+)?(?:an?\\s+|the\\s+)?" +
-            "(?:ai\\s+)?(?:image|picture|photo|illustration|logo|wallpaper|poster|artwork|icon|banner|thumbnail)s?\\s*" +
-            "(?:of|for|showing|with|about|:|-)?\\s*(.+)$", OPTS
+    private const val LEAD = "^(?:(?:hey|hi|ok|okay|so|please|can you|could you|would you|will you|" +
+        "i want you to|i need you to|i'd like you to|i would like you to|go ahead and|vince|clara|davina)[,]?\\s+)*"
+    private const val NOUN = "(?:ai\\s+)?(?:image|picture|photo|illustration|logo|wallpaper|poster|artwork|icon|" +
+        "banner|thumbnail|drawing|sketch|render|graphic)s?"
+
+    private val STRONG = Regex(
+        LEAD + "(?:generate|create|make|produce|render|design|draw|paint|sketch|build)\\s+(?:me\\s+)?(?:an?\\s+|the\\s+|some\\s+)?" +
+            NOUN + "\\s*(?:of|for|showing|with|about|:|-)?\\s*(.+)$", OPTS
+    )
+    private val SOFT = Regex(
+        LEAD + "(?:i want|i need|i'd like|i would like|give me|show me|get me|can i get|can i have|let me see)\\s+" +
+            "(?:an?\\s+|the\\s+|some\\s+)?" + NOUN + "\\s*(?:of|showing|with|about|:)\\s*(.+)$", OPTS
     )
     private val DRAW = Regex(
-        "^(?:please\\s+|can you\\s+|could you\\s+)*(?:draw|paint|sketch)\\s+(?:me\\s+)?(?:an?\\s+|the\\s+)(.+)$", OPTS
+        LEAD + "(?:draw|paint|sketch)\\s+(?:me\\s+)?(?:an?\\s+|the\\s+)(.+)$", OPTS
     )
 
     fun extractPrompt(text: String): String? {
         val t = text.replace('\u2019', '\'').trim().trimEnd('.', '!', '?')
-        WITH_NOUN.find(t)?.let { return it.groupValues[1].trim().ifBlank { null } }
+        STRONG.find(t)?.let { return it.groupValues[1].trim().ifBlank { null } }
+        SOFT.find(t)?.let { return it.groupValues[1].trim().ifBlank { null } }
         DRAW.find(t)?.let {
             val what = it.groupValues[1].trim()
             // "draw a conclusion / line / comparison" are figures of speech, not image requests

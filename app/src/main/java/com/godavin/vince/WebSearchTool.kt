@@ -69,6 +69,71 @@ object WebSearchTool {
         return false
     }
 
+    // ---- v2.3: FORCED search. No model discretion. ----
+    // Any message containing one of these words ALWAYS goes to Tavily.
+    private val FORCE_REGEX = Regex(
+        "\\b(search|look\\s?up|look for|find out|research|google|check online|online|latest|" +
+            "current|currently|recent|recently|right now|now|today|tonight|tomorrow|this week|" +
+            "this month|news|update|updates|outlook|forecast|what'?s happening|trending|" +
+            "price of|live|breaking|anything new|what'?s new|so far)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** True when the message contains a word that demands live info. */
+    fun mustSearch(text: String): Boolean = FORCE_REGEX.containsMatchIn(text) || needsSearch(text)
+
+    private val SMALL_TALK = setOf(
+        "hi", "hello", "hey", "yo", "thanks", "thank you", "thx", "ok", "okay", "k", "yes", "no",
+        "yeah", "yep", "nope", "cool", "nice", "great", "good", "alright", "sure", "got it", "lol",
+        "haha", "bye", "goodbye", "good morning", "good afternoon", "good evening", "good night",
+        "hey vince", "hey clara", "hey davina", "hi vince", "hi clara", "hi davina", "hello vince",
+        "hello clara", "hello davina", "wow", "perfect", "awesome", "right", "hmm", "continue", "go on"
+    )
+
+    private val IMPERATIVE_STARTERS = listOf(
+        "analyze", "analyse", "give me", "tell me", "show me", "explain", "compare", "suggest",
+        "recommend", "summarize", "summarise", "break down", "plan", "review", "evaluate",
+        "what do you think", "should i", "advise", "help me", "walk me"
+    )
+
+    /** Wide default: every real question or substantive request searches.
+     * Only tiny small talk skips it. */
+    fun shouldSearch(text: String): Boolean {
+        val cleaned = text.trim().lowercase().replace(Regex("[^a-z0-9' ]"), " ").replace(Regex("\\s+"), " ").trim()
+        if (cleaned.isBlank()) return false
+        if (cleaned in SMALL_TALK) return false
+        if (mustSearch(text)) return true
+        if (looksLikeQuestion(text)) return true
+        if (IMPERATIVE_STARTERS.any { cleaned.startsWith(it) }) return true
+        return cleaned.split(" ").size >= 5
+    }
+
+    /** Builds the Tavily query: strips the swipe-reply wrapper and glues very
+     * short follow-ups ("and silver?") onto the previous user message so the
+     * search still has a subject. */
+    fun buildQuery(userMessage: String, history: List<ChatMessage>): String {
+        var q = userMessage.replace(Regex("^\\(Replying to earlier message: \"[^\"]*\"\\)\\s*"), "").trim()
+        val words = q.split(Regex("\\s+")).size
+        if (words <= 4) {
+            val prev = history.lastOrNull { it.fromUser }?.text?.trim()
+            if (!prev.isNullOrBlank() && !prev.equals(q, ignoreCase = true)) {
+                q = prev.take(160) + " " + q
+            }
+        }
+        return q.take(300)
+    }
+
+    /** News-first live search (hard recency filter), then a general search if
+     * the news index has nothing (timeless questions like "how does an FVG
+     * work"). Returns blank on zero results. */
+    suspend fun liveSearch(apiKey: String, query: String, days: Int): Result<String> {
+        val news = search(apiKey, query, topic = "news", days = days)
+        val newsText = news.getOrNull()
+        if (!newsText.isNullOrBlank()) return news
+        val general = search(apiKey, query, topic = "general")
+        return if (general.isSuccess) general else (if (news.isFailure) news else general)
+    }
+
     private val QUESTION_STARTERS = listOf(
         "who ", "who's", "what ", "what's", "when ", "when's", "where ",
         "why ", "how ", "is ", "are ", "was ", "were ", "does ", "do ",

@@ -39,10 +39,26 @@ import com.godavin.vince.ui.theme.VinceTheme
  */
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { askContactsOnce() }
+
+    private val contactsPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    // v2.3 - ask for Contacts once (after the notification prompt, never both at the
+    // same time) so "message <name> ..." can find the number locally.
+    private fun askContactsOnce() {
+        val appPrefs = getSharedPreferences("vince_prompts", MODE_PRIVATE)
+        if (!appPrefs.getBoolean("asked_contacts", false) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            appPrefs.edit().putBoolean("asked_contacts", true).apply()
+            contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
 
         // Stage 13 - ask for notification permission up front so reminders
@@ -55,7 +71,11 @@ class MainActivity : ComponentActivity() {
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                askContactsOnce()
             }
+        } else {
+            askContactsOnce()
         }
 
         // Stage 14 fix - reminders were only ever firing while the app was

@@ -33,3 +33,17 @@ NEW IN 2.3
    "Autostart page" button that opens your phone maker's autostart screen.
    PHONE SETUP STILL NEEDED ONCE: Autostart ON for VINCE, Battery = No restrictions, lock VINCE
    in recent apps. No app can override a phone that force-stops it.
+
+
+v2.3 FIXES (round 2, after first on-phone test)
+- Persistent "Keeping alerts on time" notification REMOVED. A background guard notification now only
+  exists while a reminder is pending and says exactly which one ("Reminder pending for 6:40 PM: ...").
+- AI image generation REMOVED (low quality). Code-drawn candle/SMC patterns stay.
+- VOICE REPLY BUG FIXED: the spoken turn crashed silently on a Compose scroll call that cannot run
+  inside the voice session, so VINCE never answered by voice. Errors now show in chat.
+- Beeps: recognizer earcons are muted for the session; ONE beep when the conversation starts and ONE
+  when it ends. (Some phones refuse stream muting - tell me if beeps remain.)
+- Phone actions: "open whatsapp and message <name> saying <text>" now works (contact lookup by name,
+  needs Contacts permission, asked once; you press send). "message <name> <text>" also works when
+  the name matches a saved contact. "open X and <something else>" opens X and says honestly it
+  cannot do the rest inside other apps. Without permission it opens WhatsApp's picker with text filled.

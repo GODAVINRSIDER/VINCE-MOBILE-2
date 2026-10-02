@@ -22,12 +22,21 @@ object PersonalTools {
         PlanCommands.handle(context, text)?.let { return it }
         ReminderCommands.handle(context, text)?.let { return it }
         DeviceActions.handle(context, text)?.let { return it }
+        MessageActions.handle(context, text)?.let { return it }
 
         StructuredMemory.handleMemoryCommand(context, text)?.let { return it }
 
-        val appName = AppLauncher.extractAppNameFromCommand(text)
-        if (appName != null) {
+        val rawAppName = AppLauncher.extractAppNameFromCommand(text)
+        if (rawAppName != null) {
+            // "open spotify and play something" -> open Spotify, be honest about the rest
+            val split = Regex("\\s+(?:and|then|&)\\s+", RegexOption.IGNORE_CASE).split(rawAppName, 2)
+            val appName = split[0].trim()
+            val leftover = split.getOrNull(1)?.trim().orEmpty()
             val openedLabel = AppLauncher.openAppByName(context, appName)
+            if (openedLabel != null && leftover.isNotBlank()) {
+                ActivityLog.addEvent(context, "Opened $openedLabel")
+                return "Opened $openedLabel. I can't do \"$leftover\" inside other apps - I can only open them."
+            }
             return if (openedLabel != null) {
                 ActivityLog.addEvent(context, "Opened $openedLabel")
                 "Opening $openedLabel."

@@ -17,7 +17,6 @@ object AlertPrefs {
     const val K_BRIEFING = "alert_briefing"
     const val K_JOURNAL = "alert_journal"
     const val K_RELIABLE = "alert_reliable_mode"
-    const val K_GUARD = "alert_background_guard"
     const val K_BRIEF_MIN = "alert_briefing_minutes"
     const val K_JOURNAL_MIN = "alert_journal_minutes"
     const val K_SESSION_LEAD = "alert_session_lead"
@@ -30,7 +29,7 @@ object AlertPrefs {
     // visible from the first run; each one has its own switch.
     private val DEFAULT_ON = mapOf(
         K_LONDON to true, K_NY to true, K_ASIA to false, K_NEWS to true,
-        K_NEWS_ALL_CCY to false, K_BRIEFING to true, K_JOURNAL to true, K_RELIABLE to true, K_GUARD to true
+        K_NEWS_ALL_CCY to false, K_BRIEFING to true, K_JOURNAL to true, K_RELIABLE to true
     )
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

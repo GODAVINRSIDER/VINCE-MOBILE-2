@@ -43,7 +43,7 @@ class ReminderGuardService : Service() {
         /** Starts or stops the guard to match what is pending. Safe to call from anywhere. */
         fun sync(context: Context) {
             val app = context.applicationContext
-            val needed = ReminderStore.getAll(app).isNotEmpty() || AlertPrefs.isOn(app, AlertPrefs.K_GUARD)
+            val needed = ReminderStore.getAll(app).isNotEmpty()
             try {
                 if (needed) {
                     ContextCompat.startForegroundService(app, Intent(app, ReminderGuardService::class.java))
@@ -61,10 +61,14 @@ class ReminderGuardService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        goForeground("VINCE is keeping watch")
+        goForeground(statusText())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (ReminderStore.getAll(applicationContext).isEmpty()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         goForeground(statusText())
         loop?.cancel()
         loop = scope.launch { runLoop() }
@@ -108,9 +112,9 @@ class ReminderGuardService : Service() {
             }
             tick++
 
-            updateNotification(statusText(pending.size))
+            updateNotification(statusText())
 
-            if (pending.isEmpty() && !AlertPrefs.isOn(applicationContext, AlertPrefs.K_GUARD)) {
+            if (pending.isEmpty()) {
                 stopSelf()
                 return
             }
@@ -121,8 +125,15 @@ class ReminderGuardService : Service() {
         }
     }
 
-    private fun statusText(count: Int = ReminderStore.getAll(applicationContext).size): String =
-        if (count > 0) "Watching $count reminder${if (count == 1) "" else "s"}" else "Keeping alerts on time"
+    // The notification only exists while a reminder is pending, and says which one,
+    // so it can never be mistaken for a message from VINCE.
+    private fun statusText(count: Int = -1): String {
+        val list = ReminderStore.getAll(applicationContext).sortedBy { it.fireAtMillis }
+        val first = list.firstOrNull() ?: return "Reminder pending"
+        val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(first.fireAtMillis))
+        val more = if (list.size > 1) " (+${list.size - 1} more)" else ""
+        return "Reminder pending for $time: ${first.message.take(40)}$more"
+    }
 
     private fun updateNotification(text: String) {
         try {
@@ -131,7 +142,7 @@ class ReminderGuardService : Service() {
     }
 
     private fun buildNotification(text: String) = NotificationCompat.Builder(this, CHANNEL)
-        .setContentTitle("VINCE")
+        .setContentTitle("Reminder pending")
         .setContentText(text)
         .setSmallIcon(android.R.drawable.ic_popup_reminder)
         .setOngoing(true)

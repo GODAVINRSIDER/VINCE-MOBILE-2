@@ -68,8 +68,6 @@ private const val DEFAULT_VISION_PROMPT = "Look at this image and describe what 
     "stay flexible to whatever the image actually is, don't force a chart-analysis framing " +
     "onto something that isn't one."
 
-private data class GeneratedImage(val path: String, val caption: String)
-
 @Composable
 fun ChatScreen(threadId: String, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -240,39 +238,33 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         scope.launch {
             // Stage 13 - real-time (price/time/news) checked first, then
             // memory/reminder commands, then fall through to the AI.
-            // Image generation ("generate an image of ...") - checked first,
-            // since it needs the network and a longer wait than any local command.
-            // Chart patterns (morning star, FVG, order block...) are DRAWN by code so
-            // they are always accurate; everything else goes to the image models.
+            // v2.3 - chart patterns (morning star, FVG, order block...) are DRAWN by
+            // code so they are always accurate. AI image generation was removed
+            // (low quality); a generic "generate an image" gets a short honest reply.
             val patternDrawing = CandleChart.tryDraw(context, text)
-            val imagePrompt = if (patternDrawing == null) ImageCommands.extractPrompt(text) else null
-            if (patternDrawing != null || imagePrompt != null) {
-                val genResult: Result<GeneratedImage> = if (patternDrawing != null) {
-                    Result.success(GeneratedImage(patternDrawing.path, patternDrawing.caption))
-                } else {
-                    ImageGenerator.generate(context, imagePrompt!!).map { GeneratedImage(it.path, it.summary()) }
-                }
-                val genMsg = genResult.fold(
-                    onSuccess = { img ->
-                        ChatMessage(
-                            fromUser = false,
-                            text = img.caption,
-                            persona = activePersona.name,
-                            imagePath = img.path
-                        )
-                    },
-                    onFailure = { e ->
-                        ChatMessage(fromUser = false, text = e.message ?: "Couldn't generate the image.", persona = activePersona.name)
-                    }
+            if (patternDrawing != null) {
+                val genMsg = ChatMessage(
+                    fromUser = false,
+                    text = patternDrawing.caption,
+                    persona = activePersona.name,
+                    imagePath = patternDrawing.path
                 )
                 messages.add(genMsg)
-                // Failure notices are shown but not saved into the thread history.
-                if (genMsg.imagePath != null) ConversationStore.addMessage(context, threadId, genMsg)
-                ActivityLog.addEvent(context, if (genMsg.imagePath != null) "Image generated" else "Image generation failed")
+                ConversationStore.addMessage(context, threadId, genMsg)
+                ActivityLog.addEvent(context, "Pattern drawn")
                 sending = false
-                if (speakReplies && genMsg.imagePath != null) {
-                    VoiceOutput.speak("Here's your image.", activePersona)
+                if (speakReplies) VoiceOutput.speak("Here's your drawing.", activePersona)
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
                 }
+                return@launch
+            }
+            CandleChart.declineGenericImage(text)?.let { notice ->
+                val noticeMsg = ChatMessage(fromUser = false, text = notice, persona = activePersona.name)
+                messages.add(noticeMsg)
+                ConversationStore.addMessage(context, threadId, noticeMsg)
+                sending = false
+                if (speakReplies) VoiceOutput.speak(notice, activePersona)
                 if (messages.isNotEmpty()) {
                     listState.animateScrollToItem(messages.size - 1)
                 }
@@ -333,37 +325,39 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
         messages.add(userMsg)
         ConversationStore.addMessage(context, threadId, userMsg)
         sending = true
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-
-        val imagePrompt0 = CandleChart.tryDraw(context, spoken)
-        val imagePrompt = if (imagePrompt0 == null) ImageCommands.extractPrompt(spoken) else null
-        val replyMsg: ChatMessage
-        var speech: String
-        if (imagePrompt0 != null) {
-            replyMsg = ChatMessage(fromUser = false, text = imagePrompt0.caption, persona = activePersona.name, imagePath = imagePrompt0.path)
-            speech = "Here's your drawing."
-        } else if (imagePrompt != null) {
-            val r = ImageGenerator.generate(context, imagePrompt)
-            replyMsg = r.fold(
-                onSuccess = { ChatMessage(fromUser = false, text = it.summary(), persona = activePersona.name, imagePath = it.path) },
-                onFailure = { ChatMessage(fromUser = false, text = it.message ?: "Couldn't generate the image.", persona = activePersona.name) }
-            )
-            speech = if (replyMsg.imagePath != null) "Here's your image." else "I couldn't generate that image right now."
-        } else {
-            val localReply = RealTimeTools.handleLocalCommand(context, spoken)
-                ?: PersonalTools.handleLocalCommand(context, spoken)
-            val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona, historySnapshot)
-            replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
-            speech = TradeIdea.stripForSpeech(reply)
-        }
-        messages.add(replyMsg)
-        if (replyMsg.imagePath != null || imagePrompt == null) {
+        // NOTE: no listState.animateScrollToItem here. This runs inside the voice
+        // session's own coroutine, which has no Compose frame clock, and that call
+        // throws there - it silently killed every spoken reply. Scrolling is done by
+        // a LaunchedEffect on messages.size instead.
+        try {
+            val drawing = CandleChart.tryDraw(context, spoken)
+            val replyMsg: ChatMessage
+            val speech: String
+            if (drawing != null) {
+                replyMsg = ChatMessage(fromUser = false, text = drawing.caption, persona = activePersona.name, imagePath = drawing.path)
+                speech = "Here's your drawing."
+            } else {
+                val notice = CandleChart.declineGenericImage(spoken)
+                val localReply = notice
+                    ?: RealTimeTools.handleLocalCommand(context, spoken)
+                    ?: PersonalTools.handleLocalCommand(context, spoken)
+                val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona, historySnapshot)
+                replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+                speech = TradeIdea.stripForSpeech(reply)
+            }
+            messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
+            ActivityLog.addEvent(context, "Voice chat with ${activePersona.displayName}")
+            return if (speakReplies) speech else null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val err = "That voice message failed: ${e.message ?: e.javaClass.simpleName}"
+            messages.add(ChatMessage(fromUser = false, text = err, persona = activePersona.name))
+            return "Sorry, that one failed."
+        } finally {
+            sending = false
         }
-        ActivityLog.addEvent(context, "Voice chat with ${activePersona.displayName}")
-        sending = false
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
-        return if (speakReplies) speech else null
     }
 
     fun startListening() {
@@ -376,6 +370,12 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             owner = "chat",
             personaProvider = { activePersona }
         ) { spoken -> voiceTurn(spoken) }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            try { listState.animateScrollToItem(messages.size - 1) } catch (e: Exception) { }
+        }
     }
 
     // Leaving the chat ends the session so the mic is never left open behind another screen.

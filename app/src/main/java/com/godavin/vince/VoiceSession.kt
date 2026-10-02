@@ -2,6 +2,8 @@ package com.godavin.vince
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -56,6 +58,67 @@ object VoiceSession {
     private var job: Job? = null
     private var recognizer: SpeechRecognizer? = null
     private var onPhase: ((Phase) -> Unit)? = null
+    private var appCtx: Context? = null
+    private val mutedByUs = mutableSetOf<Int>()
+
+    // ---- beep control -------------------------------------------------
+    // The Google recognizer plays a start and end earcon on EVERY listen, and a
+    // continuous conversation restarts it constantly, so it beeps in a loop. We
+    // mute the earcon streams for the whole session and play our own single beep
+    // at the start and at the end instead.
+    private val EARCON_STREAMS = intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM)
+
+    private fun audio(): AudioManager? = appCtx?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+    private fun muteStream(stream: Int) {
+        val am = audio() ?: return
+        try {
+            if (!am.isStreamMute(stream)) {
+                am.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                mutedByUs.add(stream)
+                appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.putBoolean("muted_flag", true)?.apply()
+            }
+        } catch (e: Exception) { /* some phones refuse (Do Not Disturb rules); beeps may remain */ }
+    }
+
+    private fun unmuteStream(stream: Int) {
+        val am = audio() ?: return
+        if (stream !in mutedByUs) return
+        try { am.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0) } catch (e: Exception) { }
+        mutedByUs.remove(stream)
+        if (mutedByUs.isEmpty()) {
+            appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.putBoolean("muted_flag", false)?.apply()
+        }
+    }
+
+    private fun muteEarcons() { EARCON_STREAMS.forEach { muteStream(it) } }
+
+    private fun unmuteAll() {
+        mutedByUs.toList().forEach { unmuteStream(it) }
+    }
+
+    private fun beep() {
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 140)
+            scope.launch { delay(400); try { tg.release() } catch (e: Exception) { } }
+        } catch (e: Exception) { }
+    }
+
+    /** Call on app start: if the app died mid-session, make sure nothing stays muted. */
+    fun restoreAudioAfterCrash(context: Context) {
+        if (active) return
+        val am = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean("muted_flag", false)) {
+            try {
+                am.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
+                am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+            } catch (e: Exception) { }
+            prefs.edit().putBoolean("muted_flag", false).apply()
+        }
+    }
 
     fun bargeInEnabled(context: Context): Boolean =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_BARGE, true)
@@ -90,9 +153,13 @@ object VoiceSession {
         }
         this.owner = owner
         this.onPhase = onPhase
+        this.appCtx = app
         changePhase(Phase.LISTENING)
         job = scope.launch {
             try {
+                beep()                 // the ONE beep that says "I'm listening"
+                delay(260)
+                muteEarcons()          // silence the recognizer's own beeps for the session
                 runLoop(app, personaProvider, handler)
             } catch (e: CancellationException) {
                 throw e
@@ -116,11 +183,16 @@ object VoiceSession {
     }
 
     private fun cleanup() {
+        val wasActive = phase != Phase.OFF
         try { recognizer?.cancel() } catch (e: Exception) { }
         try { recognizer?.destroy() } catch (e: Exception) { }
         recognizer = null
         VoiceOutput.stop()
-        if (phase != Phase.OFF) changePhase(Phase.OFF)
+        unmuteAll()
+        if (wasActive) {
+            changePhase(Phase.OFF)
+            beep()                     // the ONE beep that says "conversation ended"
+        }
         onPhase = null
     }
 
@@ -142,7 +214,8 @@ object VoiceSession {
                 heard = carry
                 carry = null
             } else {
-                val res = listenOnce(ctx, null)
+                muteStream(AudioManager.STREAM_MUSIC)   // earcon may ride the media stream; VINCE is silent now
+                val res = try { listenOnce(ctx, null) } finally { unmuteStream(AudioManager.STREAM_MUSIC) }
                 heard = res.text?.trim()?.takeIf { it.isNotBlank() }
                 if (heard == null) {
                     when (res.error) {
@@ -186,7 +259,7 @@ object VoiceSession {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                null
+                "Sorry, something went wrong with that one."
             }
 
             if (!reply.isNullOrBlank()) {

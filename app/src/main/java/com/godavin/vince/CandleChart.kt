@@ -321,6 +321,22 @@ object CandleChart {
         }
     }
 
+    private val GENERIC_IMAGE = Regex(
+        "^(?:(?:hey|hi|ok|okay|so|please|can you|could you|would you|will you|i want you to|i need you to|vince|clara|davina)[,]?\\s+)*" +
+            "(?:generate|create|make|produce|render|design|draw|paint|sketch|show me|give me)\\s+(?:me\\s+)?(?:an?\\s+|the\\s+|some\\s+)?" +
+            "(?:ai\\s+)?(?:image|picture|photo|illustration|logo|wallpaper|poster|artwork|drawing)s?\\b.*$",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+    )
+
+    /** AI image generation was removed in v2.3 (low quality). Say so instead of letting
+     * the chat model pretend to make a picture. */
+    fun declineGenericImage(text: String): String? =
+        if (GENERIC_IMAGE.matches(text.trim().replace('\u2019', '\'')))
+            "I don't generate AI images anymore - the quality wasn't good enough. I can still draw " +
+                "candlestick and smart-money patterns accurately (try \"draw a morning star\" or " +
+                "\"show me a bullish FVG\"), and I can analyze any chart or image you send me."
+        else null
+
     private fun wordMatch(text: String, phrase: String): Boolean =
         Regex("\\b" + Regex.escape(phrase) + "s?\\b").containsMatchIn(text)
 

@@ -65,7 +65,7 @@ object VoiceSession {
             .edit().putBoolean(KEY_BARGE, enabled).apply()
     }
 
-    private fun setPhase(p: Phase) {
+    private fun changePhase(p: Phase) {
         phase = p
         onPhase?.invoke(p)
     }
@@ -90,7 +90,7 @@ object VoiceSession {
         }
         this.owner = owner
         this.onPhase = onPhase
-        setPhase(Phase.LISTENING)
+        changePhase(Phase.LISTENING)
         job = scope.launch {
             try {
                 runLoop(app, personaProvider, handler)
@@ -120,7 +120,7 @@ object VoiceSession {
         try { recognizer?.destroy() } catch (e: Exception) { }
         recognizer = null
         VoiceOutput.stop()
-        if (phase != Phase.OFF) setPhase(Phase.OFF)
+        if (phase != Phase.OFF) changePhase(Phase.OFF)
         onPhase = null
     }
 
@@ -136,7 +136,7 @@ object VoiceSession {
         var hardErrors = 0
 
         while (true) {
-            setPhase(Phase.LISTENING)
+            changePhase(Phase.LISTENING)
             val heard: String?
             if (carry != null) {
                 heard = carry
@@ -180,7 +180,7 @@ object VoiceSession {
                 return
             }
 
-            setPhase(Phase.THINKING)
+            changePhase(Phase.THINKING)
             val reply = try {
                 handler(heard)
             } catch (e: CancellationException) {
@@ -190,7 +190,7 @@ object VoiceSession {
             }
 
             if (!reply.isNullOrBlank()) {
-                setPhase(Phase.SPEAKING)
+                changePhase(Phase.SPEAKING)
                 carry = speakWithBargeIn(ctx, reply, personaProvider())
             }
             lastActivity = System.currentTimeMillis()

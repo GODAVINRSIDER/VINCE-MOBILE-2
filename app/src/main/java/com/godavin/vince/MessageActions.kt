@@ -191,7 +191,11 @@ object MessageActions {
                 if (pkg != null) i.setPackage(pkg)
                 context.startActivity(i)
                 ActivityLog.addEvent(context, "WhatsApp draft to ${c.name}")
-                return "Opened WhatsApp to ${c.name} with your message. Press send when you're ready."
+                return if (PhoneAgent.armSend(context, c.name, body)) {
+                    "Opened WhatsApp to ${c.name} with your message. Say \"send it\" and I'll press Send, or press it yourself."
+                } else {
+                    "Opened WhatsApp to ${c.name} with your message. Press send when you're ready."
+                }
             } catch (e: ActivityNotFoundException) {
                 // try the next package
             } catch (e: Exception) {
@@ -208,7 +212,11 @@ object MessageActions {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(i)
             ActivityLog.addEvent(context, "SMS draft to ${c.name}")
-            "Opened a text to ${c.name} with your message. Press send when you're ready."
+            if (PhoneAgent.armSend(context, c.name, body)) {
+                "Opened a text to ${c.name} with your message. Say \"send it\" and I'll press Send, or press it yourself."
+            } else {
+                "Opened a text to ${c.name} with your message. Press send when you're ready."
+            }
         } catch (e: Exception) {
             "I couldn't open a messaging app."
         }

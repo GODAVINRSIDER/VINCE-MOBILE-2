@@ -12,8 +12,8 @@ android {
         applicationId = "com.godavin.vince"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "2.3-phone"
+        versionCode = 5
+        versionName = "2.4-phone"
     }
 
     // Fix - every GitHub Actions build used to generate a brand-new random

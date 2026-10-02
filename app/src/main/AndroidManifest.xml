@@ -57,6 +57,7 @@
          broader than that. -->
     <queries>
         <package android:name="com.whatsapp" />
+        <package android:name="net.metaquotes.metatrader5" />
         <package android:name="com.whatsapp.w4b" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -122,6 +123,34 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- v2.4 - phone control: reads the screen and taps/types when asked. -->
+        <service
+            android:name=".VinceAccessibilityService"
+            android:exported="true"
+            android:label="VINCE phone control"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- v2.4 - lets VINCE read incoming notifications and use their Reply action. -->
+        <service
+            android:name=".VinceNotificationListener"
+            android:exported="true"
+            android:label="VINCE notifications"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- v2.4 - the Stop button on the "VINCE is controlling your phone" notification. -->
+        <receiver android:name=".AgentStopReceiver" android:exported="false" />
 
         <!-- v2.3 - background guard: keeps reminders on time (second delivery path). -->
         <service

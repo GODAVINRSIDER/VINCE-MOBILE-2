@@ -307,6 +307,10 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        PanelCard { PhoneControlSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         PanelCard { AlertsSection() }
 
         Spacer(modifier = Modifier.height(20.dp))

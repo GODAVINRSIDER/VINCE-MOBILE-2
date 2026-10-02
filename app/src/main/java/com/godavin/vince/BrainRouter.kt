@@ -63,7 +63,7 @@ object BrainRouter {
             "news heads-ups, a daily briefing and an end-of-day journal check-in, keep the " +
             "user's trading rules and today's plan, search the web and run multi-step " +
             "research (when a search key is set), remember facts across every chat, float " +
-            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, and make in-app calls to PC-VINCE. You cannot " +
+            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), operate the phone when Phone control is on (read the screen, tap, type, scroll, open apps, send WhatsApp/SMS or notification replies after the user says yes, and prepare/place MetaTrader 5 orders only from a complete user instruction after an explicit yes, with a lot cap), read incoming message notifications, draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, and make in-app calls to PC-VINCE. You cannot " +
             "place or manage trades from the phone, cannot generate AI pictures (that was removed - you can only draw chart patterns by code), you are not linked to any trading " +
             "account (so you do not know balance, open trades or profit), you cannot place " +
             "calls or send messages by yourself (the user presses the button), cannot flip " +

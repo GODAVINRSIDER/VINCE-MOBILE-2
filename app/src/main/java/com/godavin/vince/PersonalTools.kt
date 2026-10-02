@@ -19,10 +19,12 @@ object PersonalTools {
     fun handleLocalCommand(context: Context, text: String): String? {
         // Trading rules / today's plan, reminders and small phone actions
         // are all deterministic, so they run before anything else.
+        // v2.4 - a pending "yes/no" or a stop command must win over everything else.
+        PhoneAgent.handle(context, text)?.let { return it }
         PlanCommands.handle(context, text)?.let { return it }
         ReminderCommands.handle(context, text)?.let { return it }
-        DeviceActions.handle(context, text)?.let { return it }
         MessageActions.handle(context, text)?.let { return it }
+        DeviceActions.handle(context, text)?.let { return it }
 
         StructuredMemory.handleMemoryCommand(context, text)?.let { return it }
 

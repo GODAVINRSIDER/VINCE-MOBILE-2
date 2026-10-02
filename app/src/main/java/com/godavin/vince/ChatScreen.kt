@@ -162,6 +162,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
                 val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
                 messages.add(replyMsg)
+                if (!visionFailed) TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
                 // A failure notice is shown but not saved into the thread's
                 // history (it would pollute the AI's memory of the chat) and
                 // not read aloud.
@@ -274,6 +275,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
             val reply = localReply ?: BrainRouter.sendMessage(context, textForAi, activePersona, historySnapshot)
+            TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
             val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
             messages.add(replyMsg)
             ConversationStore.addMessage(context, threadId, replyMsg)
@@ -342,6 +344,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     ?: RealTimeTools.handleLocalCommand(context, spoken)
                     ?: PersonalTools.handleLocalCommand(context, spoken)
                 val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona, historySnapshot)
+                TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
                 replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
                 speech = TradeIdea.stripForSpeech(reply)
             }
@@ -370,6 +373,18 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             owner = "chat",
             personaProvider = { activePersona }
         ) { spoken -> voiceTurn(spoken) }
+    }
+
+    // v2.4 - results from phone control (which may finish after you switched apps) land here.
+    androidx.compose.runtime.DisposableEffect(threadId) {
+        PhoneAgent.sink = { text ->
+            scope.launch {
+                val m = ChatMessage(fromUser = false, text = text, persona = activePersona.name)
+                messages.add(m)
+                ConversationStore.addMessage(context, threadId, m)
+            }
+        }
+        onDispose { PhoneAgent.sink = null }
     }
 
     androidx.compose.runtime.LaunchedEffect(messages.size) {

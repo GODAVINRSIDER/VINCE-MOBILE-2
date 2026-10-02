@@ -301,6 +301,12 @@ class OverlayService : Service() {
     // that only ends on "end convo" / "I'm done" / 3 minutes of silence / another
     // tap. Works on the phone speaker or with earphones.
     private fun toggleVoiceSession() {
+        if (PhoneAgent.running) {
+            // kill switch: a tap on the widget halts phone control immediately
+            PhoneAgent.stop(applicationContext)
+            VoiceOutput.speak("Stopped.", PersonaState.getActive(applicationContext))
+            return
+        }
         if (VoiceSession.active) {
             VoiceSession.stop()
             haloView?.visibility = View.INVISIBLE

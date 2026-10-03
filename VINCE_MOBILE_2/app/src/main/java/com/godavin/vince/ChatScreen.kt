@@ -1,0 +1,1046 @@
+package com.godavin.vince
+
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.io.File
+import kotlin.math.roundToInt
+
+// Fix - this used to hard-assume every image was a trading chart, which
+// is exactly what broke on the marketing-email screenshot (DAVINA had
+// to explicitly say "this isn't actually a chart" before it could even
+// answer). Now genuinely neutral: describes whatever's actually there,
+// and only leans into a price-action read if the image is actually a
+// chart. Only used when NOTHING was typed as a caption - a real typed
+// caption/question always takes priority (see the pending-attachment
+// flow below).
+private const val DEFAULT_VISION_PROMPT = "Look at this image and describe what it actually " +
+    "is first, in one line, before analyzing anything - don't assume it's a trading chart " +
+    "unless it genuinely is one. If it IS a trading chart, then give a quick summary line " +
+    "in plain sentence form (no Markdown, no headers, no tables): the timeframe if visible, " +
+    "trend, key level, rough buy/sell lean, then ask if a fuller breakdown is wanted. If " +
+    "it's anything else, just describe/answer naturally based on what it actually shows - " +
+    "stay flexible to whatever the image actually is, don't force a chart-analysis framing " +
+    "onto something that isn't one."
+
+@Composable
+fun ChatScreen(threadId: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    var input by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var speakReplies by remember { mutableStateOf(true) }
+    // Fix - swipe-to-reply target (WhatsApp/Instagram style) - set when
+    // a message is swiped, shown as a preview above the input, cleared
+    // once sent or cancelled.
+    var replyTarget by remember { mutableStateOf<ChatMessage?>(null) }
+    // Fix - staged image attachment. Capturing/picking an image no
+    // longer sends it immediately - it sits here as a pending attachment
+    // (previewed above the input) so a caption/question can be typed
+    // AFTER seeing the image, not before it even exists.
+    var pendingImage by remember { mutableStateOf<Bitmap?>(null) }
+    var pendingImageKind by remember { mutableStateOf<String?>(null) }
+    // Stage 14 - persona switching. Loaded from PersonaState on open so
+    // it's remembered across app restarts/thread switches, not reset to
+    // VINCE every time.
+    var activePersona by remember { mutableStateOf(PersonaState.getActive(context)) }
+
+    fun switchPersona(persona: Persona) {
+        activePersona = persona
+        PersonaState.setActive(context, persona)
+    }
+
+    val messages = remember(threadId) {
+        mutableStateListOf<ChatMessage>().apply {
+            ConversationStore.getThread(context, threadId)?.messages?.let { addAll(it) }
+        }
+    }
+
+    // Fix - explicit chat rename command. Checked before the normal
+    // local-command-then-AI pipeline, same "deterministic first"
+    // discipline as everywhere else - "call this chat X" is a direct
+    // instruction, not something to hand to the AI to interpret.
+    val RENAME_PATTERNS = listOf(
+        Regex("^(?:rename|call|title|name) this chat (?:to |as )?(.+)$", RegexOption.IGNORE_CASE),
+        Regex("^(?:rename|call|title|name) this conversation (?:to |as )?(.+)$", RegexOption.IGNORE_CASE)
+    )
+
+    fun send(overrideText: String? = null) {
+        val text = (overrideText ?: input).trim()
+
+        // Fix - if an image is staged, sending now packages it with
+        // whatever's typed as the caption/question, instead of the old
+        // flow where tapping Camera/Screen/Files sent instantly. Empty
+        // caption falls back to the neutral describe-this default, not
+        // a trading-chart assumption.
+        val stagedImage = pendingImage
+        val stagedKind = pendingImageKind
+        if (stagedImage != null && !sending) {
+            val typed = text
+            val question = typed.ifBlank { DEFAULT_VISION_PROMPT } + TradeIdea.PROMPT_SUFFIX
+            val imagePath = ImageStore.save(context, stagedImage)
+            val displayText = typed.ifBlank { null }
+            val userMsg = ChatMessage(
+                fromUser = true,
+                text = displayText ?: "[${stagedKind ?: "Image"}]",
+                imagePath = imagePath
+            )
+            messages.add(userMsg)
+            ConversationStore.addMessage(context, threadId, userMsg)
+            pendingImage = null
+            pendingImageKind = null
+            input = ""
+            sending = true
+
+            scope.launch {
+                var visionFailed = false
+                val reply = try {
+                    val baos = ByteArrayOutputStream()
+                    stagedImage.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+                    val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+                    val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
+                    val openRouterKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
+                    val result = VisionRouter.describeImage(geminiKey, groqKey, openRouterKey, baos.toByteArray(), question)
+                    result.fold(
+                        onSuccess = { it },
+                        onFailure = { e ->
+                            visionFailed = true
+                            "Couldn't analyze the ${stagedKind ?: "image"}.\n${e.message}"
+                        }
+                    )
+                } catch (e: Exception) {
+                    visionFailed = true
+                    "Couldn't process the ${stagedKind ?: "image"}.\n${e.message}"
+                }
+
+                val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+                messages.add(replyMsg)
+                if (!visionFailed) TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
+                // A failure notice is shown but not saved into the thread's
+                // history (it would pollute the AI's memory of the chat) and
+                // not read aloud.
+                if (!visionFailed) ConversationStore.addMessage(context, threadId, replyMsg)
+                ActivityLog.addEvent(
+                    context,
+                    if (visionFailed) "${stagedKind ?: "Image"} analysis failed" else "${stagedKind ?: "Image"} analyzed"
+                )
+                sending = false
+                if (speakReplies && !visionFailed) {
+                    VoiceOutput.speak(TradeIdea.stripForSpeech(reply), activePersona)
+                }
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
+                }
+            }
+            return
+        }
+
+        if (text.isEmpty() || sending) return
+
+        for (pattern in RENAME_PATTERNS) {
+            val match = pattern.find(text)
+            if (match != null) {
+                val newTitle = match.groupValues[1].trim().trim('"', '\'')
+                if (newTitle.isNotBlank()) {
+                    ConversationStore.renameThread(context, threadId, newTitle)
+                    input = ""
+                    val userMsg = ChatMessage(fromUser = true, text = text)
+                    val replyMsg = ChatMessage(
+                        fromUser = false,
+                        text = "Got it, this chat is now called \"$newTitle\".",
+                        persona = activePersona.name
+                    )
+                    messages.add(userMsg)
+                    messages.add(replyMsg)
+                    ConversationStore.addMessage(context, threadId, userMsg)
+                    ConversationStore.addMessage(context, threadId, replyMsg)
+                    return
+                }
+            }
+        }
+
+        // Stage 15 fix - snapshot the thread's history BEFORE adding this
+        // new user message, so BrainRouter gets everything said so far
+        // without double-counting the message being sent right now.
+        val historySnapshot = messages.toList()
+        val isFirstExchange = historySnapshot.isEmpty()
+
+        // Fix - swipe-to-reply. When replying to an earlier message, the
+        // AI actually gets told what's being replied to (an explicit
+        // anchor back to that point in the conversation) - the DISPLAYED
+        // message still just shows what was typed; the quoted preview
+        // renders separately in the bubble (see the message list below).
+        val activeReply = replyTarget
+        val textForAi = if (activeReply != null) {
+            "(Replying to earlier message: \"${activeReply.text.take(150)}\") $text"
+        } else {
+            text
+        }
+
+        val userMsg = ChatMessage(
+            fromUser = true,
+            text = text,
+            replyToId = activeReply?.id,
+            replyToPreview = activeReply?.text?.take(80)
+        )
+        messages.add(userMsg)
+        ConversationStore.addMessage(context, threadId, userMsg)
+        input = ""
+        replyTarget = null
+        sending = true
+
+        scope.launch {
+            // Stage 13 - real-time (price/time/news) checked first, then
+            // memory/reminder commands, then fall through to the AI.
+            // v2.3 - chart patterns (morning star, FVG, order block...) are DRAWN by
+            // code so they are always accurate. AI image generation was removed
+            // (low quality); a generic "generate an image" gets a short honest reply.
+            val patternDrawing = CandleChart.tryDraw(context, text)
+            if (patternDrawing != null) {
+                val genMsg = ChatMessage(
+                    fromUser = false,
+                    text = patternDrawing.caption,
+                    persona = activePersona.name,
+                    imagePath = patternDrawing.path
+                )
+                messages.add(genMsg)
+                ConversationStore.addMessage(context, threadId, genMsg)
+                ActivityLog.addEvent(context, "Pattern drawn")
+                sending = false
+                if (speakReplies) VoiceOutput.speak("Here's your drawing.", activePersona)
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
+                }
+                return@launch
+            }
+            CandleChart.declineGenericImage(text)?.let { notice ->
+                val noticeMsg = ChatMessage(fromUser = false, text = notice, persona = activePersona.name)
+                messages.add(noticeMsg)
+                ConversationStore.addMessage(context, threadId, noticeMsg)
+                sending = false
+                if (speakReplies) VoiceOutput.speak(notice, activePersona)
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.size - 1)
+                }
+                return@launch
+            }
+
+            val localReply = RealTimeTools.handleLocalCommand(context, text)
+                ?: PersonalTools.handleLocalCommand(context, text)
+            val reply = localReply ?: BrainRouter.sendMessage(context, textForAi, activePersona, historySnapshot)
+            TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
+            val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+            messages.add(replyMsg)
+            ConversationStore.addMessage(context, threadId, replyMsg)
+            ActivityLog.addEvent(context, "Message with ${activePersona.displayName}")
+            sending = false
+            if (speakReplies) {
+                VoiceOutput.speak(reply, activePersona)
+            }
+            if (messages.isNotEmpty()) {
+                listState.animateScrollToItem(messages.size - 1)
+            }
+
+            // Fix - auto-title this thread from a real summary of what
+            // was actually said, instead of just truncating the first
+            // sentence typed. Fired after the reply so it never delays
+            // the reply itself; only runs on a thread's genuine first
+            // exchange, and only overwrites the auto "New chat" default
+            // (a manually-set or already-summarized title is never
+            // touched by this).
+            if (isFirstExchange) {
+                val currentTitle = ConversationStore.getThread(context, threadId)?.title
+                if (currentTitle == "New chat" || currentTitle == text.take(40)) {
+                    TitleGenerator.generateTitle(context, text, reply)?.let { summary ->
+                        ConversationStore.renameThread(context, threadId, summary)
+                    }
+                }
+            }
+        }
+    }
+
+    // Fix - the in-chat mic was still launching Google's own floating
+    // "Speak now" popup (RecognizerIntent as an Activity), unlike the
+    // Home mic and the floating widget's mic, both already fixed to use
+    // SpeechRecognizer directly with zero system UI. Matches that same
+    // treatment here: no popup, just a colored halo around the mic
+    // button (see the action row below) while actively listening.
+    // v2.3 - continuous Jarvis-style voice conversation (see VoiceSession.kt).
+    // One tap starts it; it keeps listening after every reply until the user says
+    // "end convo" / "I'm done", taps the mic again, or 3 minutes pass in silence.
+    val voicePhase = VoiceSession.phase
+    val isListening = voicePhase != VoiceSession.Phase.OFF && VoiceSession.owner == "chat"
+    var bargeIn by remember { mutableStateOf(VoiceSession.bargeInEnabled(context)) }
+
+    // Runs one spoken turn through the exact same pipeline as typing, then hands
+    // the reply text back so VoiceSession can speak it and listen again.
+    suspend fun voiceTurn(spoken: String): String? {
+        val historySnapshot = messages.toList()
+        val userMsg = ChatMessage(fromUser = true, text = spoken)
+        messages.add(userMsg)
+        ConversationStore.addMessage(context, threadId, userMsg)
+        sending = true
+        // NOTE: no listState.animateScrollToItem here. This runs inside the voice
+        // session's own coroutine, which has no Compose frame clock, and that call
+        // throws there - it silently killed every spoken reply. Scrolling is done by
+        // a LaunchedEffect on messages.size instead.
+        try {
+            val drawing = CandleChart.tryDraw(context, spoken)
+            val replyMsg: ChatMessage
+            val speech: String
+            if (drawing != null) {
+                replyMsg = ChatMessage(fromUser = false, text = drawing.caption, persona = activePersona.name, imagePath = drawing.path)
+                speech = "Here's your drawing."
+            } else {
+                val notice = CandleChart.declineGenericImage(spoken)
+                val localReply = notice
+                    ?: RealTimeTools.handleLocalCommand(context, spoken)
+                    ?: PersonalTools.handleLocalCommand(context, spoken)
+                val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona, historySnapshot)
+                TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
+                replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+                speech = TradeIdea.stripForSpeech(reply)
+            }
+            messages.add(replyMsg)
+            ConversationStore.addMessage(context, threadId, replyMsg)
+            ActivityLog.addEvent(context, "Voice chat with ${activePersona.displayName}")
+            return if (speakReplies) speech else null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val err = "That voice message failed: ${e.message ?: e.javaClass.simpleName}"
+            messages.add(ChatMessage(fromUser = false, text = err, persona = activePersona.name))
+            return "Sorry, that one failed."
+        } finally {
+            sending = false
+        }
+    }
+
+    fun startListening() {
+        if (VoiceSession.active) {
+            VoiceSession.stop()
+            return
+        }
+        VoiceSession.start(
+            context = context,
+            owner = "chat",
+            personaProvider = { activePersona }
+        ) { spoken -> voiceTurn(spoken) }
+    }
+
+    // v2.4 - results from phone control (which may finish after you switched apps) land here.
+    androidx.compose.runtime.DisposableEffect(threadId) {
+        PhoneAgent.sink = { text ->
+            scope.launch {
+                val m = ChatMessage(fromUser = false, text = text, persona = activePersona.name)
+                messages.add(m)
+                ConversationStore.addMessage(context, threadId, m)
+            }
+        }
+        onDispose { PhoneAgent.sink = null }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            try { listState.animateScrollToItem(messages.size - 1) } catch (e: Exception) { }
+        }
+    }
+
+    // Leaving the chat ends the session so the mic is never left open behind another screen.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { if (VoiceSession.owner == "chat") VoiceSession.stop() }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startListening()
+        }
+    }
+
+    fun onMicTapped() {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            startListening()
+        } else {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingPhotoUri
+        if (success && uri != null) {
+            val bitmap = try {
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                null
+            }
+            if (bitmap != null) {
+                pendingImage = bitmap
+                pendingImageKind = "Photo"
+            }
+        }
+    }
+
+    fun onCameraTapped() {
+        val dir = File(context.cacheDir, "camera_captures").apply { mkdirs() }
+        val file = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(context, "com.godavin.vince.fileprovider", file)
+        pendingPhotoUri = uri
+        cameraLauncher.launch(uri)
+    }
+
+    // Stage 10 - screen vision now runs through ScreenCaptureService (a
+    // proper foreground service), not a bare in-Activity call - the
+    // generalized, version-safe fix for the capture failure hit during
+    // testing (see ScreenCaptureService's docstring for why).
+    val mediaProjectionManager = remember {
+        context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    }
+    val screenCaptureHelper = remember { ScreenCaptureHelper(context) }
+
+    val screenPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            // Fix - screen capture now also stages the result instead of
+            // sending it instantly, same as camera/upload - lands in the
+            // pending-attachment preview so a caption can be typed after.
+            ScreenCaptureBridge.awaitCapture { bitmap ->
+                if (bitmap != null) {
+                    pendingImage = bitmap
+                    pendingImageKind = "Screen"
+                } else {
+                    val replyMsg = ChatMessage(
+                        fromUser = false,
+                        text = "Couldn't capture the screen. Try again - if it keeps " +
+                            "failing, that's worth reporting exactly as it happens."
+                    )
+                    messages.add(replyMsg)
+                    ConversationStore.addMessage(context, threadId, replyMsg)
+                }
+            }
+
+            // Stage 11 fix - granting the permission returns control straight
+            // back to VINCE, so capturing immediately just captures VINCE's
+            // own screen, not whatever app was open before. Give the user a
+            // moment's warning, then send VINCE to the background - this
+            // naturally surfaces whatever app was behind it (TradingView,
+            // WhatsApp, etc.) BEFORE the actual capture happens.
+            android.widget.Toast.makeText(
+                context,
+                "Switch to what you want VINCE to read - capturing in 3 seconds",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+
+            scope.launch {
+                kotlinx.coroutines.delay(3000)
+                (context as? Activity)?.moveTaskToBack(true)
+                kotlinx.coroutines.delay(400) // let the app-switch animation actually finish
+
+                val serviceIntent = Intent(context, ScreenCaptureService::class.java).apply {
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+                }
+                ContextCompat.startForegroundService(context, serviceIntent)
+            }
+        }
+    }
+
+    fun onScreenTapped() {
+        screenPermissionLauncher.launch(screenCaptureHelper.createCaptureIntent(mediaProjectionManager))
+    }
+
+    // Stage 13 - manual upload fallback. Lets Vincent screenshot himself
+    // (Android's own screenshot gesture) and hand the image straight to
+    // VINCE, sidestepping MediaProjection entirely - useful as a reliable
+    // backup for any app/device combo where Screen vision still doesn't
+    // cooperate. Uses Android's modern Photo Picker (PickVisualMedia),
+    // which needs no storage/media permission at all - the system handles
+    // access, VINCE only ever sees the one image actually picked.
+    val uploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val bitmap = try {
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                null
+            }
+            if (bitmap != null) {
+                pendingImage = bitmap
+                pendingImageKind = "Image"
+            }
+        }
+    }
+
+    fun onUploadTapped() {
+        uploadLauncher.launch(
+            androidx.activity.result.PickVisualMediaRequest(
+                ActivityResultContracts.PickVisualMedia.ImageOnly
+            )
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = activePersona.displayName,
+                fontSize = 20.sp,
+                color = activePersona.color()
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { speakReplies = !speakReplies }) {
+                    Text(if (speakReplies) "Voice: On" else "Voice: Off")
+                }
+                TextButton(onClick = onBack) {
+                    Text("Chats")
+                }
+            }
+        }
+
+        // Stage 15 fix - persona tabs redesigned as bordered glowing boxes
+        // with an icon above the label (brain/heart/lotus), matching the
+        // reference chat layout, instead of plain outlined pill buttons.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Persona.values().forEach { persona ->
+                val isActive = persona == activePersona
+                Column(
+                    modifier = Modifier
+                        .width(92.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(
+                            width = if (isActive) 1.5.dp else 1.dp,
+                            color = persona.color().copy(alpha = if (isActive) 1f else 0.35f),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .background(persona.color().copy(alpha = if (isActive) 0.16f else 0.04f))
+                        .clickable { switchPersona(persona) }
+                        .padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Image(
+                        painter = painterResource(id = personaIconRes(persona)),
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(persona.color()),
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(persona.displayName, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = persona.color())
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(modifier = Modifier.weight(1f)) {
+            // Fix - wrap the whole list in SelectionContainer so message
+            // text can actually be long-pressed and copied, same as any
+            // normal Android text - it never could be before this.
+            SelectionContainer {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(messages, key = { it.id }) { msg ->
+                        val msgPersona = Persona.fromName(msg.persona)
+                        val color = if (msg.fromUser) MaterialTheme.colorScheme.onSurface else msgPersona.color()
+                        val timeLabel = remember(msg.timestamp) {
+                            java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp))
+                        }
+
+                        // Fix - swipe-to-reply (WhatsApp/Instagram style).
+                        // Dragging a message right past a small threshold
+                        // sets it as the reply target and snaps back;
+                        // short drags just snap back with no effect.
+                        val density = LocalDensity.current
+                        val maxDragPx = with(density) { 64.dp.toPx() }
+                        val triggerPx = with(density) { 40.dp.toPx() }
+                        val offsetX = remember(msg.id) { Animatable(0f) }
+
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            if (offsetX.value > 4f) {
+                                Text(
+                                    "\u21A9",
+                                    fontSize = 18.sp,
+                                    color = activePersona.color().copy(alpha = (offsetX.value / triggerPx).coerceIn(0f, 1f)),
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .padding(start = 4.dp)
+                                )
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                                    .pointerInput(msg.id) {
+                                        detectHorizontalDragGestures(
+                                            onDragEnd = {
+                                                scope.launch {
+                                                    if (offsetX.value > triggerPx) {
+                                                        replyTarget = msg
+                                                    }
+                                                    offsetX.animateTo(0f, animationSpec = tween(200))
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                scope.launch { offsetX.animateTo(0f, animationSpec = tween(200)) }
+                                            },
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                scope.launch {
+                                                    offsetX.snapTo((offsetX.value + dragAmount).coerceIn(0f, maxDragPx))
+                                                }
+                                            }
+                                        )
+                                    }
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF0D0D0F))
+                                    .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (!msg.fromUser) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(CircleShape)
+                                                .background(color.copy(alpha = 0.15f))
+                                                .border(1.dp, color.copy(alpha = 0.5f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                painter = painterResource(id = personaIconRes(msgPersona)),
+                                                contentDescription = null,
+                                                colorFilter = ColorFilter.tint(color),
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+                                    Text(
+                                        if (msg.fromUser) "You" else msgPersona.displayName,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = color
+                                    )
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Text(timeLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                                }
+
+                                if (msg.replyToPreview != null) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(color.copy(alpha = 0.08f))
+                                            .border(0.dp, Color.Transparent)
+                                            .padding(8.dp)
+                                    ) {
+                                        Text(
+                                            msg.replyToPreview,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                        )
+                                    }
+                                }
+
+                                if (msg.imagePath != null) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    val thumbBitmap = remember(msg.imagePath) { ImageStore.loadBitmap(msg.imagePath) }
+                                    thumbBitmap?.let {
+                                        Image(
+                                            bitmap = it.asImageBitmap(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 220.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                        )
+                                    }
+                                    // Copy / Save / Share for images VINCE made (generated images).
+                                    if (!msg.fromUser) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val ok = ImageActions.copy(context, msg.imagePath)
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        if (ok) "Image copied" else "Couldn't copy the image",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                                            ) { Text("Copy", fontSize = 12.sp) }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val ok = ImageActions.saveToGallery(context, msg.imagePath)
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        if (ok) "Saved to Pictures/VINCE" else "Couldn't save the image",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                                            ) { Text("Save", fontSize = 12.sp) }
+                                            OutlinedButton(
+                                                onClick = { ImageActions.share(context, msg.imagePath) },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                                            ) { Text("Share", fontSize = 12.sp) }
+                                        }
+                                    }
+                                }
+
+                                // Trade-idea block (chart analysis) is drawn as a card;
+                                // the raw [[IDEA]] text never shows in the bubble.
+                                val parsedReply = remember(msg.text) { TradeIdea.split(msg.text) }
+                                if (parsedReply.first.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(parsedReply.first, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f))
+                                }
+                                parsedReply.second?.let { idea ->
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    TradeIdeaCard(idea)
+                                }
+                            }
+                        }
+                    }
+
+                    if (sending) {
+                        item {
+                            Text(
+                                text = "${activePersona.displayName} is thinking...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Fix - jump-to-bottom button, so getting to the latest
+            // message doesn't mean scrolling all the way down by hand.
+            // Only shown once scrolled away from the bottom.
+            val isAtBottom by remember {
+                derivedStateOf {
+                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    lastVisible >= messages.size - 1
+                }
+            }
+            if (!isAtBottom && messages.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(activePersona.color())
+                        .clickable {
+                            scope.launch { listState.animateScrollToItem(messages.size - 1) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("\u2193", fontSize = 18.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Stage 15 - quick-action suggestion chips, same spirit as the
+        // reference layout's conversation-starter pills. Tapping one
+        // sends that exact phrase through the normal send() pipeline -
+        // shortcuts, not decoration.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SuggestionChip("Check the weather") { send(overrideText = "What's the weather like right now?") }
+            SuggestionChip("Search the web") { input = "Search the web for " }
+            SuggestionChip("Open an app") { input = "Open " }
+            SuggestionChip("Help with something") { send(overrideText = "What can you help me with?") }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+
+        // Fix - input field was singleLine, so as you typed a longer
+        // message it just scrolled horizontally within one line (earlier
+        // text sliding out of view) instead of wrapping - now grows
+        // vertically like a normal chat app, up to a reasonable cap so
+        // it can't swallow the whole screen.
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Fix - reply preview, shown above the input once a message
+            // has been swiped. Cancel (x) clears it without sending.
+            replyTarget?.let { target ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(activePersona.color().copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Replying to: ${target.text.take(60)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "\u2715",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .clickable { replyTarget = null }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            // Fix - staged image preview, shown above the input once a
+            // photo/screen/upload has been captured - awaits a typed
+            // caption instead of auto-sending the instant it's captured.
+            pendingImage?.let { img ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(activePersona.color().copy(alpha = 0.1f))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        bitmap = img.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        "${pendingImageKind ?: "Image"} attached - type a caption or question, or just tap send",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "\u2715",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .clickable { pendingImage = null; pendingImageKind = null }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            Row(verticalAlignment = Alignment.Bottom) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 52.dp, max = 150.dp),
+                    placeholder = {
+                        Text(
+                            if (pendingImage != null) "Add a caption or question..."
+                            else "Message ${activePersona.displayName}..."
+                        )
+                    },
+                    maxLines = 6,
+                    shape = RoundedCornerShape(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (sending) activePersona.color().copy(alpha = 0.4f) else activePersona.color())
+                        .clickable(enabled = !sending) { send() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("\u2192", fontSize = 22.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ChatActionButton(
+                    R.drawable.ic_action_mic,
+                    when (voicePhase) {
+                        VoiceSession.Phase.LISTENING -> "Listening"
+                        VoiceSession.Phase.THINKING -> "Thinking"
+                        VoiceSession.Phase.SPEAKING -> "Speaking"
+                        else -> "Voice"
+                    }.takeIf { isListening } ?: "Voice",
+                    activePersona.color(),
+                    enabled = true,
+                    highlighted = isListening
+                ) { onMicTapped() }
+                if (isListening && voicePhase == VoiceSession.Phase.SPEAKING) {
+                    ChatActionButton(R.drawable.ic_action_mic, "Interrupt", activePersona.color(), enabled = true) { VoiceSession.interruptSpeech() }
+                }
+                if (isListening) {
+                    ChatActionButton(
+                        R.drawable.ic_action_mic,
+                        if (bargeIn) "Cut-in on" else "Cut-in off",
+                        activePersona.color(), enabled = true
+                    ) {
+                        bargeIn = !bargeIn
+                        VoiceSession.setBargeIn(context, bargeIn)
+                    }
+                }
+                ChatActionButton(R.drawable.ic_action_camera, "Camera", activePersona.color(), enabled = !sending) { onCameraTapped() }
+                ChatActionButton(R.drawable.ic_action_screen, "Screen", activePersona.color(), enabled = !sending) { onScreenTapped() }
+                ChatActionButton(R.drawable.ic_action_image, "Files", activePersona.color(), enabled = !sending) { onUploadTapped() }
+            }
+        }
+    }
+}
+
+/** Maps a persona to its icon (brain/heart/lotus) - shared by the
+ * persona tabs and each message's avatar. */
+private fun personaIconRes(persona: Persona): Int = when (persona) {
+    Persona.VINCE -> R.drawable.ic_persona_vince
+    Persona.CLARA -> R.drawable.ic_persona_clara
+    Persona.DAVINA -> R.drawable.ic_persona_davina
+}
+
+@Composable
+private fun SuggestionChip(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/**
+ * Stage 15 fix (v2) - action buttons now show a label under the icon in
+ * a bordered rounded-rect box, matching the reference layout, instead of
+ * icon-only circles.
+ */
+@Composable
+private fun ChatActionButton(
+    iconRes: Int,
+    label: String,
+    tint: Color,
+    enabled: Boolean,
+    highlighted: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (highlighted) 2.dp else 1.dp,
+                color = if (highlighted) tint else tint.copy(alpha = if (enabled) 0.4f else 0.15f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .background(tint.copy(alpha = if (highlighted) 0.28f else if (enabled) 0.1f else 0.03f))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Image(
+            painter = painterResource(id = iconRes),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(if (enabled) tint else tint.copy(alpha = 0.4f)),
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            label,
+            fontSize = 10.sp,
+            color = if (enabled) tint else tint.copy(alpha = 0.4f)
+        )
+    }
+}

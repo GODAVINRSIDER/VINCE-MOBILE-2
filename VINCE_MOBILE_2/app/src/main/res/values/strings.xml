@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">VINCE</string>
+    <string name="accessibility_service_description">Lets VINCE read the screen and tap, type and scroll for you, only when you ask it to. Every send, payment or trade needs your confirmation, and you can stop it any time.</string>
+</resources>

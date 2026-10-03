@@ -1,0 +1,196 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Needed to reach the Gemini API directly - standalone brain, no PC involved -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Dashboard visual pass - reads the real active connection type
+         (Wi-Fi/mobile/none) for the System overview panel. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Stage 5 - push-to-talk voice input -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Stage 10 - required for ScreenCaptureService to run as a proper
+         foreground service (Google's documented requirement for
+         MediaProjection, enforced strictly from Android 14+). Harmless
+         on older Android versions where it's simply not needed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Stage 13 - required on Android 13+ to actually show reminder
+         notifications; requested at runtime too, this just declares it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Stage 14 fix - reminders were firing a few minutes late using
+         Android's inexact alarm API; exact alarms need this declared
+         permission on Android 12+ (user grants it via a one-time system
+         settings screen, handled in ReminderScheduler). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Oct 2026 - alerts/reminders: USE_EXACT_ALARM is granted automatically
+         on Android 13+ (no settings screen), SET_ALARM lets "set a timer"
+         hand the timer to the Clock app. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <!-- Stage 14 fix - reminders only fired while the app was open;
+         cause was OEM background-app killing. This lets MainActivity ask,
+         once, to be exempted from battery optimization. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Stage 15 - floating draggable mic overlay, shown on top of other
+         apps while VINCE runs in the background. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Fix - widget boot-restart. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Fix - "open <app>" was failing for every app ("couldn't find an
+         app called WhatsApp") because Android 11+ hides other installed
+         apps from PackageManager queries by default (package visibility)
+         unless the app declares what it needs to see. This <queries>
+         block asks for visibility into every app that has a launcher
+         icon (i.e. anything that shows up in the app drawer) - exactly
+         what AppLauncher.kt needs to find and open apps by name, nothing
+         broader than that. -->
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="net.metaquotes.metatrader5" />
+        <package android:name="com.whatsapp.w4b" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Stage 8 - lets the system Camera app write a full-resolution
+             photo somewhere VINCE can read it back, without VINCE needing
+             its own camera permission (the Camera app handles that). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.godavin.vince.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Stage 10 - performs screen capture inside a proper foreground
+             service, per Google's documented MediaProjection requirement. -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- Stage 13 - receives the AlarmManager alarm when a reminder fires. -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Oct 2026 - session-open alerts, news heads-ups, daily briefing,
+             journal check-in. -->
+        <receiver
+            android:name=".AlertReceiver"
+            android:exported="false" />
+
+        <!-- Fix - restarts the floating widget after a phone reboot if
+             it was on before, instead of it staying off until the app is
+             manually reopened. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- v2.4 - phone control: reads the screen and taps/types when asked. -->
+        <service
+            android:name=".VinceAccessibilityService"
+            android:exported="true"
+            android:label="VINCE phone control"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- v2.4 - lets VINCE read incoming notifications and use their Reply action. -->
+        <service
+            android:name=".VinceNotificationListener"
+            android:exported="true"
+            android:label="VINCE notifications"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- v2.4 - the Stop button on the "VINCE is controlling your phone" notification. -->
+        <receiver android:name=".AgentStopReceiver" android:exported="false" />
+
+        <!-- v2.3 - background guard: keeps reminders on time (second delivery path). -->
+        <service
+            android:name=".ReminderGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="reminder_and_alert_background_guard" />
+        </service>
+
+        <!-- Stage 15 - floating overlay mic service. specialUse is the
+             generic Android 14+ foreground-service type for services that
+             don't fit the predefined categories (mediaProjection, camera,
+             location, etc) - a floating assistant overlay is exactly that
+             case, hence the required subtype declaration below. -->
+        <service
+            android:name=".OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="floating_voice_assistant_overlay" />
+        </service>
+
+        <!-- Stage 15 - transparent trampoline activities so camera/screen
+             vision can be triggered from the floating widget (both need a
+             real Activity for their system permission dialogs). Neither
+             ever shows its own UI - Theme.NoDisplay plus finish()ing as
+             soon as their one job is done. -->
+        <activity
+            android:name=".OverlayCameraActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true" />
+        <activity
+            android:name=".OverlayScreenActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true" />
+
+    </application>
+</manifest>

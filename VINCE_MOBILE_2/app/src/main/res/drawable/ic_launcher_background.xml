@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App launcher icon - background layer. Adaptive icons are 108x108dp
+     with the outer ~21dp on each edge masked/cropped by the launcher
+     (circle, squircle, rounded square depending on the phone), so this
+     just needs to be a full-bleed dark tech backdrop - the actual mark
+     lives in the foreground layer, centered in the safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108"
+                android:startColor="#050507"
+                android:endColor="#12081F" />
+        </aapt:attr>
+    </path>
+
+    <!-- faint circular HUD ring hint, echoing the reference art's linework -->
+    <path
+        android:pathData="M54,20 A34,34 0 1 1 53.9,20 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#1A2E3A"
+        android:strokeWidth="0.6" />
+</vector>

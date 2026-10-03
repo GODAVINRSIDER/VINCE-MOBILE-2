@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App launcher icon - foreground layer, redesigned to the "cleaner"
+     circular-ring style Vincent picked from the reference sheet: a
+     gradient ring (cyan -> purple -> pink) with the nested-triangle V
+     mark centered inside, instead of the mark alone. Also reused as-is
+     for the floating widget's idle look. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- gradient ring -->
+    <path
+        android:pathData="M54,24 A30,30 0 1 1 53.9,24 Z"
+        android:fillColor="#00000000"
+        android:strokeWidth="6">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="24"
+                android:startY="24"
+                android:endX="84"
+                android:endY="84"
+                android:startColor="#4CE1FF"
+                android:centerColor="#8B5CF6"
+                android:endColor="#FF4FD8" />
+        </aapt:attr>
+    </path>
+
+    <!-- nested V mark, centered inside the ring -->
+    <path
+        android:pathData="M54,66.5 L42.5,44.5 L65.5,44.5 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#4CE1FF"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M54,60.4 L47.9,48.8 L60.1,48.8 Z"
+        android:fillColor="#8B5CF6" />
+</vector>

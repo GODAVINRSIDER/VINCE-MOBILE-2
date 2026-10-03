@@ -1,0 +1,77 @@
+VINCE MOBILE 2.3 - forced live search, continuous voice, image + candle drawing, guarded reminders
+===============================================================================================
+Extract into your project folder and overwrite. app/debug.keystore is the SAME key as before
+- do not replace it. versionCode 4 / versionName 2.3-phone.
+
+NEW IN 2.3
+1. FORCED LIVE SEARCH (Tavily). The model no longer decides whether to search.
+   - Words like search, look up, research, latest, current, now, today, news, update, outlook,
+     forecast, price of... ALWAYS search.
+   - Every real question, "analyze/give me/explain..." request, or message of 5+ words also
+     searches. Only tiny small talk (hi, ok, thanks) and local commands (time, reminders, phone
+     actions) skip it.
+   - Short follow-ups ("and silver?") are glued to your previous message so the search has a subject.
+   - Prompts rewritten: no more mention of training data / knowledge cutoff, no 2024-and-earlier
+     history unless you ask. If search fails it says "couldn't pull live data" instead of guessing.
+2. CONTINUOUS VOICE (in the app AND the floating widget). Tap once; it listens, answers, listens
+   again. Ends on "end convo", "I'm done", "that's all", "stop listening", "goodbye", a tap on the
+   mic/widget, or 3 minutes of silence (it says it is going on standby). Works on the speaker or
+   with earphones. You can cut in while it talks (say "stop"/"wait" or just start your question);
+   chat also has Interrupt and a Cut-in on/off chip. On loud speaker some phones echo, so use the
+   chip if it ever interrupts itself.
+3. IMAGES. Shows which provider made the picture and why better ones were skipped. Your prompt is
+   first rewritten into a detailed one. Looser wording is recognised ("I want an image of...",
+   "show me a picture of...", "make me a logo for...").
+4. CANDLE + SMC DRAWER (drawn by code, always accurate): morning/evening star, bullish/bearish
+   engulfing, hammer, hanging man, shooting star, inverted hammer, doji (+dragonfly, gravestone),
+   three white soldiers, three black crows, harami, piercing line, dark cloud cover, tweezer
+   top/bottom, marubozu, spinning top, FVG, order block, BOS, CHoCH, liquidity sweep.
+   Say e.g. "draw a bearish engulfing" or "show me a bullish FVG".
+5. REMINDERS NOW FIRE IN THE BACKGROUND. Two independent delivery paths (alarm + a silent
+   background guard service); whichever fires first delivers, no duplicates. Louder alarm-style
+   channel. Settings > Alerts: "Keep VINCE awake in background" (on by default) and an
+   "Autostart page" button that opens your phone maker's autostart screen.
+   PHONE SETUP STILL NEEDED ONCE: Autostart ON for VINCE, Battery = No restrictions, lock VINCE
+   in recent apps. No app can override a phone that force-stops it.
+
+
+v2.3 FIXES (round 2, after first on-phone test)
+- Persistent "Keeping alerts on time" notification REMOVED. A background guard notification now only
+  exists while a reminder is pending and says exactly which one ("Reminder pending for 6:40 PM: ...").
+- AI image generation REMOVED (low quality). Code-drawn candle/SMC patterns stay.
+- VOICE REPLY BUG FIXED: the spoken turn crashed silently on a Compose scroll call that cannot run
+  inside the voice session, so VINCE never answered by voice. Errors now show in chat.
+- Beeps: recognizer earcons are muted for the session; ONE beep when the conversation starts and ONE
+  when it ends. (Some phones refuse stream muting - tell me if beeps remain.)
+- Phone actions: "open whatsapp and message <name> saying <text>" now works (contact lookup by name,
+  needs Contacts permission, asked once; you press send). "message <name> <text>" also works when
+  the name matches a saved contact. "open X and <something else>" opens X and says honestly it
+  cannot do the rest inside other apps. Without permission it opens WhatsApp's picker with text filled.
+
+VINCE MOBILE 2.4 - PHONE CONTROL (Accessibility), notification reply, MT5 trade rails
+=====================================================================================
+versionCode 5 / 2.4-phone. Same keystore.
+
+SETUP (once): VINCE > Settings > Phone control.
+ 1. Accessibility > VINCE phone control > ON. If Android blocks it ("restricted setting"):
+    App info > three dots > Allow restricted settings, then try again.
+ 2. Notification access > VINCE > ON (to read messages and use Reply).
+ 3. Optional: MetaTrader 5 trade execution switch (OFF by default). Use a DEMO account first.
+
+WHAT IT DOES
+- "phone: <anything>" or natural commands: "open youtube and search gold analysis", "play X on spotify",
+  "turn on bluetooth", "set an alarm for 6am". VINCE reads the screen and taps/types step by step.
+- "what's on my screen" / "summarize this page": switch to the app; it reads 5 seconds later.
+- "dump screen": sends the raw screen text (used to calibrate MetaTrader).
+- "read my messages": reads WhatsApp/SMS/Telegram/Gmail notifications.
+- "reply to John saying ok": uses the notification's own Reply box (confirm first).
+- "message John saying hi": opens the chat prefilled; say "send it" and it presses Send.
+- MT5: "place a buy on gold 0.01 lots SL 4510 TP 4560 on MT5" -> VINCE repeats the numbers, waits for
+  your yes, fills the ticket, VERIFIES every number on screen, then taps Buy/Sell.
+  After a chart analysis card: "take that trade 0.01 lots". Add "no need to confirm" to skip the yes.
+  Rails: switch must be ON, lots <= your cap (default 0.02, "set mt5 max lot to 0.05"), SL and TP
+  required and on the correct sides, 1 trade per minute, never invents lot/SL/TP, refuses if the
+  screen doesn't match.
+- Stop: say "stop", tap the widget, tap STOP on the "VINCE is controlling your phone" notification,
+  or the STOP button in Settings.
+- Every send/pay/post/delete/buy/sell tap waits for "yes". Screen text is treated as data, never orders.

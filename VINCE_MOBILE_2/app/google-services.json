@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "84553184158",
+    "project_id": "vince-relay",
+    "storage_bucket": "vince-relay.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:84553184158:android:e6e4d0e1fe477ac92ddc8f",
+        "android_client_info": {
+          "package_name": "com.godavin.vince"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-s9ACitEnP3opUUzQxYoKtOufnxWcglo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

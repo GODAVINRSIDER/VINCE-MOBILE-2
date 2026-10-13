@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.File
 
 /**
@@ -79,24 +81,60 @@ object BackupManager {
         }
     }
 
-    /** Restores from a previously exported backup file - OVERWRITES
-     * current on-device data with what's in the backup. That's the
-     * correct behavior for the "just reinstalled / new phone" case this
-     * exists for, since there's nothing meaningful to merge with on a
-     * fresh install. Returns true if the file parsed and restored. */
+    /** What the last restore did (or why it failed) - shown on the Settings screen. */
+    @Volatile var lastSummary: String = ""
+    @Volatile var lastError: String = ""
+
+    /** Restores from a previously exported backup file - OVERWRITES current on-device
+     * data with what's in the backup. v2.6 fixes: (1) the in-memory chat cache is now
+     * dropped after restoring - before, the app kept showing (and then re-saving) its
+     * OLD chats right over the restored file, so a restore looked like it did nothing;
+     * (2) the file is validated BEFORE anything is overwritten; (3) the current files
+     * are kept as ".before-restore" copies; (4) the result says what was restored. */
     fun restoreFromUri(context: Context, uri: Uri): Boolean {
+        lastSummary = ""
+        lastError = ""
         return try {
             val text = context.contentResolver.openInputStream(uri)
                 ?.use { it.readBytes().toString(Charsets.UTF_8) }
-                ?: return false
-            val envelope = JSONObject(text)
-            writeRaw(context, CONVERSATIONS_FILE, envelope.getString("conversations"))
-            writeRaw(context, MEMORY_FILE, envelope.getString("structured_memory"))
-            if (envelope.has("activity_log")) {
-                writeRaw(context, ACTIVITY_FILE, envelope.getString("activity_log"))
+            if (text.isNullOrBlank()) {
+                lastError = "that file is empty or can't be opened"
+                return false
             }
+            val envelope = JSONObject(text.trim().removePrefix("\uFEFF"))
+            if (!envelope.has("conversations")) {
+                lastError = "that isn't a VINCE backup file"
+                return false
+            }
+            val conversations = envelope.getString("conversations")
+            val threadCount = JSONArray(conversations).length()
+            val memory = envelope.optString("structured_memory", "")
+            if (memory.isNotBlank()) JSONTokener(memory).nextValue()   // must parse
+            val activity = envelope.optString("activity_log", "")
+
+            // keep what is there now, just in case
+            for (name in listOf(CONVERSATIONS_FILE, MEMORY_FILE, ACTIVITY_FILE)) {
+                val f = File(context.filesDir, name)
+                if (f.exists()) f.copyTo(File(context.filesDir, "$name.before-restore"), overwrite = true)
+            }
+
+            writeRaw(context, CONVERSATIONS_FILE, conversations)
+            if (memory.isNotBlank()) writeRaw(context, MEMORY_FILE, memory)
+            if (activity.isNotBlank()) writeRaw(context, ACTIVITY_FILE, activity)
+
+            // the real fix: forget the stale in-memory copy
+            ConversationStore.reload()
+
+            var messages = 0
+            val arr = JSONArray(conversations)
+            for (i in 0 until arr.length()) {
+                messages += arr.getJSONObject(i).optJSONArray("messages")?.length() ?: 0
+            }
+            lastSummary = "$threadCount chats ($messages messages)" +
+                if (memory.isNotBlank()) " and your memory" else ""
             true
         } catch (e: Exception) {
+            lastError = e.message ?: e.javaClass.simpleName
             false
         }
     }

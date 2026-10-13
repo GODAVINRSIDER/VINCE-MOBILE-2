@@ -108,12 +108,12 @@ object BrainRouter {
     // phone); this cap only governs how much rides along in a single AI
     // call, not what's actually stored.
     //
-    // v2.5 SPEED: cut from 60 to 24 messages, and older ones are shortened.
+    // v2.5 SPEED: cut from 60 messages, and older ones are shortened. (v2.6: 40.)
     // Fewer prompt tokens = every provider answers faster. The last few
     // messages stay in full; long-range facts live in StructuredMemory, and
     // the full history is still stored on-device. Raise this if recall in a
     // very long thread matters more to you than speed.
-    private const val MAX_HISTORY_MESSAGES = 24
+    private const val MAX_HISTORY_MESSAGES = 40
     private const val RECENT_FULL_MESSAGES = 4
     private const val RECENT_FULL_CHARS = 1500
     private const val OLDER_CHARS = 350
@@ -204,12 +204,24 @@ object BrainRouter {
         context: Context,
         userMessage: String,
         persona: Persona,
-        history: List<ChatMessage>
+        history: List<ChatMessage>,
+        onStatus: ((String) -> Unit)? = null
     ): Prepared {
         // Stage 13 - durable memory. Stage 14 - persona tone, so the
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
         val memoryBlock = StructuredMemory.buildContextBlock(context)
+
+        // v2.6 - real-time location (and the 48h/7-day places) only when the message
+        // is actually about where you are or have been.
+        var locationBlock = ""
+        var locationArea: String? = null
+        if (LocationTools.wantsLocation(userMessage)) {
+            onStatus?.invoke(Narration.locating(persona))
+            val (block, area) = LocationTools.promptBlock(context, userMessage)
+            locationBlock = block
+            locationArea = area
+        }
 
         // Fix - real up-to-date knowledge, not just date/time awareness.
         // Knowing today's date doesn't teach any model what's actually
@@ -278,10 +290,18 @@ object BrainRouter {
                 "who is fully up to date, and give practical guidance for today, not for some past " +
                 "year:\n"
 
-        val searchQuery = WebSearchTool.buildQuery(userMessage, history)
+        val baseQuery = WebSearchTool.buildQuery(userMessage, history)
+        val searchQuery = if (locationArea != null && LocationTools.wantsNearby(userMessage)) "$baseQuery $locationArea" else baseQuery
         val recencyDays = if (forced) 120 else SEARCH_RECENCY_DAYS
 
         var relaxConciseness = false
+        val willSearch = tavilyKey.isNotBlank() && (DeepResearch.isResearchRequest(userMessage) || searchNeeded)
+        if (willSearch) {
+            onStatus?.invoke(
+                if (DeepResearch.isResearchRequest(userMessage)) Narration.researching(persona)
+                else Narration.searching(persona, searchQuery)
+            )
+        }
         val searchBlock = if (tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
             val deepResult = DeepResearch.research(context, userMessage)
             if (deepResult != null) {
@@ -301,6 +321,10 @@ object BrainRouter {
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
         } else {
             ""
+        }
+
+        if (willSearch && searchBlock.isNotBlank()) {
+            onStatus?.invoke(Narration.reading(persona, WebSearchTool.lastSources))
         }
 
         // Search was wanted but produced nothing (no key, network down, zero hits).
@@ -335,7 +359,7 @@ object BrainRouter {
 
         val contextBlock = listOf(
             persona.roleDescription, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, styleInstruction,
-            currentDateGrounding(mayGreet(history)), memoryBlock, searchBlock, uncertaintyDisclaimer
+            currentDateGrounding(mayGreet(history)), memoryBlock, locationBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -379,8 +403,9 @@ object BrainRouter {
         context: Context,
         userMessage: String,
         persona: Persona = Persona.VINCE,
-        history: List<ChatMessage> = emptyList()
-    ): String = route(context, userMessage, persona, history, null)
+        history: List<ChatMessage> = emptyList(),
+        onStatus: ((String) -> Unit)? = null
+    ): String = route(context, userMessage, persona, history, null, onStatus)
 
     /** v2.5 - same answer, but [onDelta] receives the text piece by piece as it is
      * written (called from a background thread). The full reply is still returned. */
@@ -389,23 +414,26 @@ object BrainRouter {
         userMessage: String,
         persona: Persona = Persona.VINCE,
         history: List<ChatMessage> = emptyList(),
+        onStatus: ((String) -> Unit)? = null,
         onDelta: (String) -> Unit
-    ): String = route(context, userMessage, persona, history, onDelta)
+    ): String = route(context, userMessage, persona, history, onDelta, onStatus)
 
     private suspend fun route(
         context: Context,
         userMessage: String,
         persona: Persona,
         history: List<ChatMessage>,
-        onDelta: DeltaSink?
+        onDelta: DeltaSink?,
+        onStatus: ((String) -> Unit)?
     ): String {
-        val prepared = prepare(context, userMessage, persona, history)
+        val prepared = prepare(context, userMessage, persona, history, onStatus)
         val backends = buildBackends(context, prepared)
         if (backends.isEmpty()) {
             return "No API keys saved yet - add at least one (Gemini, Groq, or OpenRouter) in Settings."
         }
         val timeout = if (prepared.maxTokens > CHAT_MAX_TOKENS) RESEARCH_TIMEOUT_MS else OVERALL_TIMEOUT_MS
-        val (text, failures) = runRace(backends, onDelta, timeout)
+        val onSlow: (() -> Unit)? = if (onStatus == null) null else ({ onStatus(Narration.slow(persona)) })
+        val (text, failures) = runRace(backends, onDelta, timeout, onSlow)
         if (text != null) return text
         return "All providers failed:\n" + failures.joinToString("\n")
     }
@@ -465,7 +493,8 @@ object BrainRouter {
     private suspend fun runRace(
         backends: List<Backend>,
         onDelta: DeltaSink?,
-        timeoutMs: Long = OVERALL_TIMEOUT_MS
+        timeoutMs: Long = OVERALL_TIMEOUT_MS,
+        onSlow: (() -> Unit)? = null
     ): Pair<String?, List<String>> = coroutineScope {
         val result = CompletableDeferred<String?>()
         val owner = AtomicReference<String?>(null)
@@ -478,6 +507,7 @@ object BrainRouter {
         for (i in 1 until backends.size) {
             launch {
                 delay(if (i == 1) HEDGE_SECOND_MS else HEDGE_THIRD_MS)
+                if (i == 1 && !result.isCompleted && owner.get() == null) onSlow?.invoke()
                 triggers[i].complete(Unit)
             }
         }

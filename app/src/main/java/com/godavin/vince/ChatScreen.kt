@@ -78,6 +78,8 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     var sending by remember { mutableStateOf(false) }
     // v2.5 - true while a reply is being streamed into a live bubble
     var streamingLive by remember { mutableStateOf(false) }
+    // v2.6 - what VINCE is doing right now ("searching the web for..."), shown while it works
+    var statusText by remember { mutableStateOf<String?>(null) }
     var speakReplies by remember { mutableStateOf(true) }
     // Fix - swipe-to-reply target (WhatsApp/Instagram style) - set when
     // a message is swiped, shown as a preview above the input, cleared
@@ -282,6 +284,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
             // sentence instead of waiting for the whole answer.
             var liveIndex = -1
             val speaker = if (speakReplies) SentenceSpeaker(activePersona) else null
+            val narrator = StatusNarrator(scope, activePersona, speakReplies) { statusText = it }
             val reply: String
             if (localReply != null) {
                 reply = localReply
@@ -291,6 +294,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 val liveName = activePersona.name
                 val collector = launch {
                     for (d in deltas) {
+                        if (liveBuf.isEmpty()) narrator.close()   // real reply started: stop status lines
                         liveBuf.append(d)
                         speaker?.feed(d)
                         if (liveIndex < 0) {
@@ -303,12 +307,16 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     }
                 }
                 reply = try {
-                    BrainRouter.sendMessageStreaming(context, textForAi, activePersona, historySnapshot) { d ->
+                    BrainRouter.sendMessageStreaming(
+                        context, textForAi, activePersona, historySnapshot,
+                        onStatus = { narrator.update(it) }
+                    ) { d ->
                         deltas.trySend(d)
                     }
                 } finally {
                     deltas.close()
                     collector.join()
+                    narrator.close()
                 }
             }
 
@@ -388,7 +396,15 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 val localReply = notice
                     ?: RealTimeTools.handleLocalCommand(context, spoken)
                     ?: PersonalTools.handleLocalCommand(context, spoken)
-                val reply = localReply ?: BrainRouter.sendMessage(context, spoken, activePersona, historySnapshot)
+                val narrator = StatusNarrator(scope, activePersona, speakReplies) { statusText = it }
+                val reply = try {
+                    localReply ?: BrainRouter.sendMessage(
+                        context, spoken, activePersona, historySnapshot,
+                        onStatus = { narrator.update(it) }
+                    )
+                } finally {
+                    narrator.close()
+                }
                 TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
                 replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
                 speech = TradeIdea.stripForSpeech(reply)
@@ -827,7 +843,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                     if (sending && !streamingLive) {
                         item {
                             Text(
-                                text = "${activePersona.displayName} is thinking...",
+                                text = statusText ?: "${activePersona.displayName} is thinking...",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.secondary
                             )

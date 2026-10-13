@@ -21,6 +21,12 @@ class BootReceiver : BroadcastReceiver() {
             // never let alert re-arming block the widget restart below
         }
 
+        try {
+            LocationTracker.restore(context)
+        } catch (e: Exception) {
+            // location memory is optional - never block the widget restart
+        }
+
         if (!WidgetState.isEnabled(context)) return
         if (!canDrawOverlays(context)) return
 

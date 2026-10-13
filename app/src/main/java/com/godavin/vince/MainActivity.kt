@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
+        LocationTracker.restore(this)   // v2.6 - re-arm the place memory if it was on
 
         // Stage 13 - ask for notification permission up front so reminders
         // can actually show when they fire, rather than silently doing
@@ -311,6 +312,14 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        PanelCard { VoiceSettingsSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        PanelCard { LocationSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         PanelCard { AlertsSection() }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -346,9 +355,9 @@ fun BackupSection() {
     ) { uri ->
         if (uri != null) {
             message = if (BackupManager.restoreFromUri(context, uri)) {
-                "Restored - your chats, memory, and activity from that backup are now on this device."
+                "Restored ${BackupManager.lastSummary}. Go back to the chat list to see them (if anything looks old, close and reopen VINCE once)."
             } else {
-                "Couldn't read that file as a VINCE backup."
+                "Couldn't restore: ${BackupManager.lastError}."
             }
         }
     }
@@ -389,7 +398,7 @@ fun BackupSection() {
     Spacer(modifier = Modifier.height(8.dp))
     Row {
         OutlinedButton(onClick = {
-            restoreLauncher.launch(arrayOf("application/json"))
+            restoreLauncher.launch(arrayOf("*/*"))   // v2.6 - Drive/WhatsApp often label the .json as another type, which greyed it out
         }) {
             Text("Restore from Google Drive")
         }

@@ -2,6 +2,10 @@
 
     <!-- Needed to reach the Gemini API directly - standalone brain, no PC involved -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- v2.6 - real-time location and the 48h / 7-day place memory -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- Dashboard visual pass - reads the real active connection type
          (Wi-Fi/mobile/none) for the System overview panel. -->
@@ -192,5 +196,6 @@
             android:theme="@android:style/Theme.NoDisplay"
             android:excludeFromRecents="true" />
 
+        <receiver android:name=".LocationReceiver" android:exported="false" />
     </application>
 </manifest>

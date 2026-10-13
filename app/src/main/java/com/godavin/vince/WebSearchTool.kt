@@ -30,6 +30,9 @@ object WebSearchTool {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
+    /** Sites used by the most recent search - only used to narrate progress. */
+    @Volatile var lastSources: List<String> = emptyList()
+
     // v2.5 - an ordinary lookup (basic depth) must never hold up the reply for
     // long: connect in 3s, whole call done in 4s, otherwise it counts as "could
     // not pull live data" and VINCE answers anyway. Deep research (advanced
@@ -287,14 +290,21 @@ object WebSearchTool {
                     }
 
                     val summary = StringBuilder()
+                    val hosts = mutableListOf<String>()
                     for (i in 0 until results.length()) {
                         val item = results.getJSONObject(i)
+                        // v2.6 - remember the sites so VINCE can say "reading reuters.com"
+                        item.optString("url").takeIf { it.isNotBlank() }?.let { u ->
+                            val h = u.substringAfter("://").substringBefore("/").removePrefix("www.")
+                            if (h.isNotBlank() && h !in hosts) hosts.add(h)
+                        }
                         val title = item.optString("title")
                         val content = item.optString("content").take(if (depth == "advanced") 800 else 300)
                         val published = item.optString("published_date").takeIf { it.isNotBlank() }
                         val dateTag = if (published != null) "[published: $published] " else ""
                         summary.append("- $dateTag$title: $content\n")
                     }
+                    lastSources = hosts.take(2)
                     Result.success(summary.toString().trim())
                 }
             } catch (e: Exception) {

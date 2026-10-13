@@ -1,36 +1,42 @@
-VINCE MOBILE 2.5 - SPEED ROUND (versionCode 6 / versionName 2.5-phone)
-======================================================================
+VINCE MOBILE 2.6 (versionCode 7 / versionName 2.6-phone)  -  includes everything from 2.5
+==========================================================================================
 Extract into your project folder and overwrite (zip root is app/ - no wrapper folder).
 app/debug.keystore is untouched - do not replace it.
 
-GOAL: first words in ~1-2 seconds instead of 4-5, and no more waiting 10s on a dead provider.
+NEW IN 2.6
+1. GUIDED PHONE-CONTROL SETUP (Settings > Phone control). One button walks you through
+   restricted settings -> Accessibility -> Notification access, opens each screen, shows the
+   exact taps, ticks each step and opens the next one by itself when you come back. No adb,
+   no laptop, works on any phone.
+2. BACKUP RESTORE FIXED. Cause: the app kept its old chats in memory and wrote them back over
+   the restored file on the next message. Also the file picker greyed out .json files that
+   Drive/WhatsApp label as another type. Now: cache is dropped after restore, the file is
+   checked before anything is overwritten, current data is kept as *.before-restore, any file
+   type can be picked, and the result says what came back ("12 chats (340 messages)").
+   (Chat photos are not part of the backup file - only chats, memory, activity.)
+3. ELEVENLABS VOICE (Settings > Voice). Main voice for VINCE/CLARA/DAVINA when a key is saved;
+   the phone's own voice is the automatic fallback (no key, switched off, offline, quota used
+   up). Speaks sentence by sentence while the rest downloads, so first words come fast.
+   Enter your voice IDs per persona (defaults are stock ElevenLabs voices).
+4. NO MORE LONG PAUSES AFTER A FULL STOP. Paragraph breaks used to be turned into ". " right
+   after an existing full stop (".. "), which the phone voice rested on; ellipses did the same.
+   Now they become short comma pauses. (ElevenLabs has no such pause at all.)
+5. LIVE STATUS NARRATION. While VINCE works it shows, and says out loud in the active persona,
+   what it is doing: "Give me a moment, searching the web for X" / "Found it. Reading
+   reuters.com and fxstreet.com" / "Checking where you are" / "That brain is slow, switching".
+   Spoken only if you are still waiting after ~1 second, max 3 lines per reply.
+6. HISTORY CAP 40 messages (was 24 in 2.5, 60 before).
+7. LOCATION (Settings > Location & places). Real-time location for "where am I", "near me"
+   (adds your area to the web search), distances and "navigate to X" (opens Google Maps).
+   Optional place memory: remembers where you've been for 48 hours or 7 days (your choice),
+   erases anything older automatically, stored only on the phone, never in backups.
+   "Clear history now" button. For all-day memory choose "Allow all the time".
 
-WHAT CHANGED
-1. GEMINI THINKING OFF (minimal). Gemini 3.6 Flash thinks by default, which was most of the old
-   4-5s wait. Chat now sends thinkingLevel "minimal"; if Google ever rejects that, it steps down
-   to thinkingBudget 0, then to no setting, and remembers (GeminiClient.kt).
-2. PROVIDER RACE instead of one-after-another (BrainRouter.kt). The fastest healthy provider
-   starts at once; if it has produced nothing after 1.3s the next starts alongside it (3.2s for
-   the third), or immediately if one fails. First to answer wins, the others are cut off.
-   Old behaviour: wait for Gemini to fail (+1.5s retry), then Groq, then OpenRouter.
-3. SELF-TUNING ORDER + CIRCUIT BREAKER (ProviderHealth.kt). Remembers each provider's recent
-   speed and skips one that failed in the last 45s. Resets when the app restarts.
-4. GROQ reasoning_effort "low" (gpt-oss-120b reasons before answering; low makes it near-instant).
-5. STREAMING in the typed chat. The reply appears word by word in a live bubble, and (if
-   replies are spoken) VINCE starts talking on the first finished sentence.
-   Voice conversation, widget and Home mic still wait for the whole reply, but now get the
-   faster providers + race.
-6. TIGHTER TIMEOUTS: connect 6s, no sleep-and-retry on the chat path, 14s overall cap (45s for
-   research). Tavily lookups: 4s cap, and no slow second search after a timeout.
-7. LEANER PROMPT: history sent to the AI is now the last 24 messages (older ones shortened to
-   350 chars, last 4 in full) instead of 60. Everything is still stored on-device.
-   To go back: MAX_HISTORY_MESSAGES in BrainRouter.kt.
-8. VOICE: end-of-speech wait cut from ~2.2s to ~1.3s (VoiceSession.kt) so your question is sent sooner.
+FILES: new - ElevenVoice, StatusNarrator, LocationTracker, LocationSection, VoiceSettingsSection,
+PhoneSetup, ProviderHealth, HttpStream. Changed - BrainRouter, GeminiClient, OpenAiCompatibleClient,
+WebSearchTool, VoiceOutput, VoiceSession, ChatScreen, MainActivity, PhoneControlSection, ApiKeyStore,
+RealTimeTools, ConversationStore, BackupManager, BootReceiver, AndroidManifest.xml, app/build.gradle.kts
 
-FILES: ProviderHealth.kt (new), HttpStream.kt (new), GeminiClient.kt, OpenAiCompatibleClient.kt,
-BrainRouter.kt, WebSearchTool.kt, VoiceOutput.kt, ChatScreen.kt, VoiceSession.kt, app/build.gradle.kts
-
-EXPECTED TIMINGS (rough): no-search question ~1-2s to first words; question that triggers a
-live search ~2.5-3.5s (Tavily adds 1-2s).
-
-If the voice cuts you off mid-sentence, raise the two SILENCE_LENGTH numbers in VoiceSession.kt.
+AFTER INSTALLING: Settings > Voice: paste ElevenLabs key + voice IDs > Save > Test.
+Settings > Location: switch on, allow location (and "all the time" for background memory).
+New permissions added: location (fine, coarse, background).

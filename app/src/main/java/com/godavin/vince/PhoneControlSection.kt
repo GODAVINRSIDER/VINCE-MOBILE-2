@@ -18,6 +18,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,30 @@ fun PhoneControlSection() {
     var tick by remember { mutableStateOf(0) }      // bump to re-read statuses after returning from Settings
     var mt5On by remember { mutableStateOf(Mt5Trader.enabled(context)) }
 
+    var guided by remember { mutableStateOf(false) }
+    var lastDone by remember { mutableStateOf(0) }
+
+    // v2.6 - re-check every status the moment you come back from a Settings screen
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) tick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // guided mode: when a step gets done, open the next one automatically
+    LaunchedEffect(tick) {
+        if (guided) {
+            val done = PhoneSetup.doneCount(context)
+            if (done > lastDone) {
+                lastDone = done
+                if (done >= 3) guided = false
+                PhoneSetup.openNextStep(context)
+            }
+        }
+    }
+
     val accOn = tick >= 0 && VinceAccessibilityService.isEnabled(context)
     val accLive = VinceAccessibilityService.isRunning
     val notifOn = tick >= 0 && VinceNotificationListener.isEnabled(context)
@@ -50,6 +76,28 @@ fun PhoneControlSection() {
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
         )
         Spacer(modifier = Modifier.height(10.dp))
+
+        val restricted = if (tick >= 0) PhoneSetup.restrictedUnlocked(context) else null
+        StatusLine(
+            "Step 1 - Restricted settings unlocked",
+            when (restricted) { true -> "ON"; false -> "LOCKED"; null -> "unknown" }
+        )
+        StatusLine("Step 2 - Phone control (Accessibility)", if (accLive) "ON" else if (accOn) "On, starting..." else "OFF")
+        StatusLine("Step 3 - Notification access", if (notifOn) "ON" else "OFF")
+        Button(
+            onClick = {
+                guided = true
+                lastDone = PhoneSetup.doneCount(context)
+                PhoneSetup.openNextStep(context)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Set up phone control (guided)") }
+        Text(
+            "Works on any phone, no laptop needed. VINCE opens each screen for you, tells you the exact taps, and moves to " +
+                "the next step by itself when you come back.",
+            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+        )
 
         StatusLine("Phone control (Accessibility)", if (accLive) "ON" else if (accOn) "On, starting..." else "OFF")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

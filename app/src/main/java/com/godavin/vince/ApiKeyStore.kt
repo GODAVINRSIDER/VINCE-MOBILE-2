@@ -11,6 +11,7 @@ enum class Provider(val displayName: String, val prefKey: String) {
     OPENROUTER("OpenRouter", "openrouter_api_key"),
     FINNHUB("Finnhub", "finnhub_api_key"),
     TAVILY("Tavily", "tavily_api_key"),
+    ELEVENLABS("ElevenLabs", "elevenlabs_api_key"),
 }
 
 /**

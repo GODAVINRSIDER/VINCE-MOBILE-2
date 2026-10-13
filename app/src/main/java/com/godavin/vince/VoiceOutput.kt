@@ -28,6 +28,7 @@ object VoiceOutput {
     private const val VINCE_VOICE_NAME = "en-us-x-iom-local"
 
     private var tts: TextToSpeech? = null
+    private var appContext: Context? = null
     private var ready = false
     private var defaultVoice: Voice? = null
     private var vinceVoice: Voice? = null
@@ -37,7 +38,7 @@ object VoiceOutput {
     @Volatile private var pending: CompletableDeferred<Unit>? = null
     private var utteranceCounter = 0
 
-    val isSpeaking: Boolean get() = tts?.isSpeaking == true
+    val isSpeaking: Boolean get() = tts?.isSpeaking == true || ElevenVoice.isPlaying
 
     @Volatile private var pendingId: String? = null
 
@@ -49,6 +50,8 @@ object VoiceOutput {
 
     fun init(context: Context) {
         if (tts != null) return
+        appContext = context.applicationContext
+        ElevenVoice.init(context)   // v2.6 - ElevenLabs is the main voice when a key is saved
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.US
@@ -67,7 +70,19 @@ object VoiceOutput {
         }
     }
 
+    private fun elevenReady(): Boolean {
+        val c = appContext ?: return false
+        return ElevenVoice.available(c)
+    }
+
     fun speak(text: String, persona: Persona = Persona.VINCE) {
+        if (text.isBlank()) return
+        if (elevenReady()) {
+            tts?.stop()
+            ElevenVoice.speak(stripMarkdownForSpeech(text).take(3900), persona)
+            return
+        }
+        ElevenVoice.stop()
         speakInternal(text, persona, TextToSpeech.QUEUE_FLUSH)
     }
 
@@ -75,6 +90,13 @@ object VoiceOutput {
      * ([first] = true), later pieces queue up behind it, so VINCE starts talking
      * on the first finished sentence while the rest is still being written. */
     fun speakChunk(text: String, persona: Persona, first: Boolean) {
+        if (text.isBlank()) return
+        if (elevenReady()) {
+            if (first) tts?.stop()
+            ElevenVoice.speakChunk(stripMarkdownForSpeech(text).take(3900), persona, first)
+            return
+        }
+        if (first) ElevenVoice.stop()
         speakInternal(text, persona, if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD)
     }
 
@@ -113,11 +135,23 @@ object VoiceOutput {
     /** Speaks and suspends until the speech ends, is interrupted, or a safety
      * timeout passes. Used by the continuous voice session. */
     suspend fun speakAwait(text: String, persona: Persona = Persona.VINCE) {
+        if (text.isBlank()) return
+        if (elevenReady()) {
+            tts?.stop()
+            ElevenVoice.speakAwait(stripMarkdownForSpeech(text).take(3900), persona)
+            return
+        }
+        ElevenVoice.stop()
+        speakSystemAwait(text, persona)
+    }
+
+    /** The phone's own voice, waiting until it is done. Also the fallback for ElevenVoice. */
+    suspend fun speakSystemAwait(text: String, persona: Persona = Persona.VINCE) {
         if (!ready || text.isBlank()) return
         val d = CompletableDeferred<Unit>()
         pendingId = "vince_utt_${utteranceCounter + 1}"
         pending = d
-        speak(text, persona)
+        speakInternal(text, persona, TextToSpeech.QUEUE_FLUSH)
         withTimeoutOrNull(maxOf(10_000L, text.length * 110L)) { d.await() }
         if (pending === d) pending = null
     }
@@ -152,12 +186,20 @@ object VoiceOutput {
             .replace(Regex("\\b(\\d+)w\\b")) { "${it.groupValues[1]} week" }
             // Table pipes and remaining Markdown symbols - strip, not speak.
             .replace(Regex("[|*_#`]"), "")
-            .replace(Regex("\\n{2,}"), ". ")
+            // v2.6 - no more long rests: a line break after punctuation is just a space,
+            // any other line break is a light comma pause, and "..." is a comma. Before,
+            // paragraph breaks became ". " right after an existing full stop (".. "), which
+            // the engine read as a long pause.
+            .replace(Regex("([.!?:;,])[ \\t]*\\n+"), "$1 ")
+            .replace(Regex("\\n+"), ", ")
+            .replace(Regex("\\.{2,}|\u2026"), ",")
+            .replace(Regex("\\s{2,}"), " ")
             .trim()
     }
 
     fun stop() {
         tts?.stop()
+        ElevenVoice.stop()
         finishPending()
     }
 }

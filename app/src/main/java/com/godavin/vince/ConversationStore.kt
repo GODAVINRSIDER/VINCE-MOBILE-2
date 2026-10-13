@@ -54,6 +54,13 @@ object ConversationStore {
 
     private fun file(context: Context) = File(context.filesDir, FILE_NAME)
 
+    /** v2.6 - forget the in-memory copy so the next read comes from the file. Needed after a
+     * restore: without it, the old cached chats stayed on screen and were then written back
+     * over the restored file on the very next message. */
+    fun reload() {
+        cache = null
+    }
+
     private fun load(context: Context): MutableList<ChatThread> {
         cache?.let { return it }
         val list = mutableListOf<ChatThread>()

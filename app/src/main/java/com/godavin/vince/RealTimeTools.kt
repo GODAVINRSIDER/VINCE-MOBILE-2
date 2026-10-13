@@ -38,6 +38,9 @@ object RealTimeTools {
     suspend fun handleLocalCommand(context: Context, text: String): String? {
         val lower = text.lowercase()
 
+        // v2.6 - "where am I" and "navigate to ..." (Google Maps) are answered instantly here.
+        LocationTools.handleLocalCommand(context, text)?.let { return it }
+
         // Briefing on demand - built from the clock, session times, the
         // economic calendar, optional headlines, and the user's own rules
         // and plan (see BriefingBuilder). Not linked to any trading account.

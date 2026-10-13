@@ -18,13 +18,17 @@ object ProviderHealth {
         mapOf("Gemini" to 900L, "Groq" to 700L, "OpenRouter" to 3000L)
     )
 
-    fun markFailed(name: String) { failedAt[name] = System.currentTimeMillis() }
+    /** [cooldownMs] = how long to skip this provider (default 45s). A dead key or
+     * used-up quota gets a long one so it is not retried on every message. */
+    fun markFailed(name: String, cooldownMs: Long = COOLDOWN_MS) {
+        failedAt[name] = System.currentTimeMillis() + cooldownMs
+    }
 
     fun markOk(name: String) { failedAt.remove(name) }
 
     fun coolingDown(name: String): Boolean {
-        val t = failedAt[name] ?: return false
-        return System.currentTimeMillis() - t < COOLDOWN_MS
+        val until = failedAt[name] ?: return false
+        return System.currentTimeMillis() < until
     }
 
     fun recordSpeed(name: String, ms: Long) {

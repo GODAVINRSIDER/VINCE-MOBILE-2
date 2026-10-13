@@ -76,6 +76,8 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    // v2.5 - true while a reply is being streamed into a live bubble
+    var streamingLive by remember { mutableStateOf(false) }
     var speakReplies by remember { mutableStateOf(true) }
     // Fix - swipe-to-reply target (WhatsApp/Instagram style) - set when
     // a message is swiped, shown as a preview above the input, cleared
@@ -274,15 +276,58 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
 
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
-            val reply = localReply ?: BrainRouter.sendMessage(context, textForAi, activePersona, historySnapshot)
+
+            // v2.5 - the reply streams into a live bubble as it is written, and
+            // (if replies are spoken) VINCE starts talking on the first finished
+            // sentence instead of waiting for the whole answer.
+            var liveIndex = -1
+            val speaker = if (speakReplies) SentenceSpeaker(activePersona) else null
+            val reply: String
+            if (localReply != null) {
+                reply = localReply
+            } else {
+                val deltas = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+                val liveBuf = StringBuilder()
+                val liveName = activePersona.name
+                val collector = launch {
+                    for (d in deltas) {
+                        liveBuf.append(d)
+                        speaker?.feed(d)
+                        if (liveIndex < 0) {
+                            messages.add(ChatMessage(fromUser = false, text = liveBuf.toString(), persona = liveName))
+                            liveIndex = messages.size - 1
+                            streamingLive = true
+                        } else if (liveIndex < messages.size) {
+                            messages[liveIndex] = messages[liveIndex].copy(text = liveBuf.toString())
+                        }
+                    }
+                }
+                reply = try {
+                    BrainRouter.sendMessageStreaming(context, textForAi, activePersona, historySnapshot) { d ->
+                        deltas.trySend(d)
+                    }
+                } finally {
+                    deltas.close()
+                    collector.join()
+                }
+            }
+
             TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
-            val replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
-            messages.add(replyMsg)
+            val replyMsg: ChatMessage
+            if (liveIndex >= 0 && liveIndex < messages.size) {
+                replyMsg = messages[liveIndex].copy(text = reply)
+                messages[liveIndex] = replyMsg
+            } else {
+                replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+                messages.add(replyMsg)
+            }
+            streamingLive = false
             ConversationStore.addMessage(context, threadId, replyMsg)
             ActivityLog.addEvent(context, "Message with ${activePersona.displayName}")
             sending = false
             if (speakReplies) {
-                VoiceOutput.speak(reply, activePersona)
+                if (liveIndex >= 0 && speaker != null) speaker.finish()
+                else VoiceOutput.speak(reply, activePersona)
             }
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
@@ -779,7 +824,7 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                         }
                     }
 
-                    if (sending) {
+                    if (sending && !streamingLive) {
                         item {
                             Text(
                                 text = "${activePersona.displayName} is thinking...",

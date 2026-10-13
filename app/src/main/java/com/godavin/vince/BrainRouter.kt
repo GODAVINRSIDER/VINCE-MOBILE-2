@@ -1,10 +1,20 @@
 package com.godavin.vince
 
 import android.content.Context
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+
+private typealias DeltaSink = (String) -> Unit
 
 /**
  * Tries Gemini first, then Groq, then OpenRouter - falling through
@@ -97,7 +107,24 @@ object BrainRouter {
     // uncapped history forever on-device (and restorable on a new
     // phone); this cap only governs how much rides along in a single AI
     // call, not what's actually stored.
-    private const val MAX_HISTORY_MESSAGES = 60
+    //
+    // v2.5 SPEED: cut from 60 to 24 messages, and older ones are shortened.
+    // Fewer prompt tokens = every provider answers faster. The last few
+    // messages stay in full; long-range facts live in StructuredMemory, and
+    // the full history is still stored on-device. Raise this if recall in a
+    // very long thread matters more to you than speed.
+    private const val MAX_HISTORY_MESSAGES = 24
+    private const val RECENT_FULL_MESSAGES = 4
+    private const val RECENT_FULL_CHARS = 1500
+    private const val OLDER_CHARS = 350
+
+    // v2.5 speed settings
+    private const val CHAT_MAX_TOKENS = 1500
+    private const val RESEARCH_MAX_TOKENS = 3500
+    private const val HEDGE_SECOND_MS = 1300L   // start the next provider if no reply yet
+    private const val HEDGE_THIRD_MS = 3200L
+    private const val OVERALL_TIMEOUT_MS = 14_000L
+    private const val RESEARCH_TIMEOUT_MS = 45_000L   // long research answers need longer
 
     // Fix - passive memory capture (see MemoryExtractor.kt). Runs on the
     // side, off the coroutine that's building the actual reply, so an
@@ -107,10 +134,12 @@ object BrainRouter {
 
     private fun buildTranscript(history: List<ChatMessage>): String {
         if (history.isEmpty()) return ""
-        return history.takeLast(MAX_HISTORY_MESSAGES).joinToString("\n") { msg ->
+        val recent = history.takeLast(MAX_HISTORY_MESSAGES)
+        return recent.mapIndexed { i, msg ->
             val label = if (msg.fromUser) "User" else Persona.fromName(msg.persona).displayName
-            "$label: ${msg.text}"
-        }
+            val limit = if (i >= recent.size - RECENT_FULL_MESSAGES) RECENT_FULL_CHARS else OLDER_CHARS
+            "$label: ${msg.text.take(limit)}"
+        }.joinToString("\n")
     }
 
     // Fix - Vincent noticed VINCE reasoning as if it were 2024/2025 in
@@ -171,14 +200,12 @@ object BrainRouter {
         return quietMs > 6 * 60 * 60 * 1000L
     }
 
-    suspend fun sendMessage(
+    private suspend fun prepare(
         context: Context,
         userMessage: String,
-        persona: Persona = Persona.VINCE,
-        history: List<ChatMessage> = emptyList()
-    ): String {
-        val attempts = mutableListOf<String>()
-
+        persona: Persona,
+        history: List<ChatMessage>
+    ): Prepared {
         // Stage 13 - durable memory. Stage 14 - persona tone, so the
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
@@ -340,48 +367,176 @@ object BrainRouter {
             append("User: $userMessage")
         }
 
+        return Prepared(fullMessage, if (relaxConciseness) RESEARCH_MAX_TOKENS else CHAT_MAX_TOKENS)
+    }
+
+    private class Prepared(val fullMessage: String, val maxTokens: Int)
+
+    private class Backend(val name: String, val run: suspend (DeltaSink?) -> Result<String>)
+
+    /** Whole reply at once (voice, widget, dashboard mic). */
+    suspend fun sendMessage(
+        context: Context,
+        userMessage: String,
+        persona: Persona = Persona.VINCE,
+        history: List<ChatMessage> = emptyList()
+    ): String = route(context, userMessage, persona, history, null)
+
+    /** v2.5 - same answer, but [onDelta] receives the text piece by piece as it is
+     * written (called from a background thread). The full reply is still returned. */
+    suspend fun sendMessageStreaming(
+        context: Context,
+        userMessage: String,
+        persona: Persona = Persona.VINCE,
+        history: List<ChatMessage> = emptyList(),
+        onDelta: (String) -> Unit
+    ): String = route(context, userMessage, persona, history, onDelta)
+
+    private suspend fun route(
+        context: Context,
+        userMessage: String,
+        persona: Persona,
+        history: List<ChatMessage>,
+        onDelta: DeltaSink?
+    ): String {
+        val prepared = prepare(context, userMessage, persona, history)
+        val backends = buildBackends(context, prepared)
+        if (backends.isEmpty()) {
+            return "No API keys saved yet - add at least one (Gemini, Groq, or OpenRouter) in Settings."
+        }
+        val timeout = if (prepared.maxTokens > CHAT_MAX_TOKENS) RESEARCH_TIMEOUT_MS else OVERALL_TIMEOUT_MS
+        val (text, failures) = runRace(backends, onDelta, timeout)
+        if (text != null) return text
+        return "All providers failed:\n" + failures.joinToString("\n")
+    }
+
+    /** v2.5 - healthy and fastest providers first. Each provider has its own
+     * fast-fail settings; see GeminiClient.chat / OpenAiCompatibleClient.chat. */
+    private fun buildBackends(context: Context, p: Prepared): List<Backend> {
+        val msg = p.fullMessage
+        val max = p.maxTokens
+        val list = mutableListOf<Backend>()
+
         val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
         if (geminiKey.isNotBlank()) {
-            val result = GeminiClient.sendMessage(geminiKey, fullMessage)
-            result.onSuccess { return it }
-            attempts.add("Gemini: ${result.exceptionOrNull()?.message ?: "failed"}")
+            list += Backend("Gemini") { sink ->
+                if (sink == null) GeminiClient.chat(geminiKey, msg, max)
+                else GeminiClient.chatStream(geminiKey, msg, max, sink)
+            }
         }
 
         val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
         if (groqKey.isNotBlank()) {
-            val result = OpenAiCompatibleClient.sendMessage(
-                baseUrl = "https://api.groq.com/openai/v1/chat/completions",
-                apiKey = groqKey,
-                model = "openai/gpt-oss-120b",
-                userMessage = fullMessage,
-                providerLabel = "Groq"
-            )
-            result.onSuccess { return it }
-            attempts.add("Groq: ${result.exceptionOrNull()?.message ?: "failed"}")
+            list += Backend("Groq") { sink ->
+                val url = "https://api.groq.com/openai/v1/chat/completions"
+                if (sink == null) {
+                    OpenAiCompatibleClient.chat(url, groqKey, "openai/gpt-oss-120b", msg, "Groq", max, "low")
+                } else {
+                    OpenAiCompatibleClient.chatStream(url, groqKey, "openai/gpt-oss-120b", msg, "Groq", max, "low", sink)
+                }
+            }
         }
 
         val openRouterKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
         if (openRouterKey.isNotBlank()) {
-            val result = OpenAiCompatibleClient.sendMessage(
-                baseUrl = "https://openrouter.ai/api/v1/chat/completions",
-                apiKey = openRouterKey,
-                // "openrouter/free" is OpenRouter's own router model - it always
-                // resolves to whichever specific free model is currently available
-                // on their end, rather than us hardcoding one exact free model
-                // name that goes stale whenever THAT model gets rotated out
-                // (which is exactly what broke here the first time).
-                model = "openrouter/free",
-                userMessage = fullMessage,
-                providerLabel = "OpenRouter"
-            )
-            result.onSuccess { return it }
-            attempts.add("OpenRouter: ${result.exceptionOrNull()?.message ?: "failed"}")
+            list += Backend("OpenRouter") { sink ->
+                // "openrouter/free" always resolves to whichever free model is
+                // currently available, instead of a hardcoded name that goes stale.
+                val url = "https://openrouter.ai/api/v1/chat/completions"
+                if (sink == null) {
+                    OpenAiCompatibleClient.chat(url, openRouterKey, "openrouter/free", msg, "OpenRouter", max, null)
+                } else {
+                    OpenAiCompatibleClient.chatStream(url, openRouterKey, "openrouter/free", msg, "OpenRouter", max, null, sink)
+                }
+            }
         }
 
-        if (attempts.isEmpty()) {
-            return "No API keys saved yet - add at least one (Gemini, Groq, or OpenRouter) in Settings."
+        val order = ProviderHealth.order(list.map { it.name })
+        return list.sortedBy { order.indexOf(it.name) }
+    }
+
+    /**
+     * v2.5 - the provider race. The best provider starts immediately; if it has
+     * not produced anything after HEDGE_SECOND_MS the next one starts alongside
+     * it (and the third later), or sooner if one fails. The first to produce text
+     * wins and the rest are cancelled on the spot. A failing provider no longer
+     * makes you wait for it before the next one is tried.
+     */
+    private suspend fun runRace(
+        backends: List<Backend>,
+        onDelta: DeltaSink?,
+        timeoutMs: Long = OVERALL_TIMEOUT_MS
+    ): Pair<String?, List<String>> = coroutineScope {
+        val result = CompletableDeferred<String?>()
+        val owner = AtomicReference<String?>(null)
+        val partial = StringBuilder()
+        val failures = ConcurrentLinkedQueue<String>()
+        val remaining = AtomicInteger(backends.size)
+        val triggers = backends.map { CompletableDeferred<Unit>() }
+
+        triggers[0].complete(Unit)
+        for (i in 1 until backends.size) {
+            launch {
+                delay(if (i == 1) HEDGE_SECOND_MS else HEDGE_THIRD_MS)
+                triggers[i].complete(Unit)
+            }
         }
 
-        return "All providers failed:\n" + attempts.joinToString("\n")
+        backends.forEachIndexed { i, b ->
+            launch {
+                triggers[i].await()
+                if (result.isCompleted) return@launch
+                val t0 = System.currentTimeMillis()
+                var gotFirst = false
+
+                val sink: DeltaSink? = if (onDelta == null) null else (fun(d: String) {
+                    owner.compareAndSet(null, b.name)
+                    if (owner.get() == b.name) {
+                        if (!gotFirst) {
+                            gotFirst = true
+                            ProviderHealth.recordSpeed(b.name, System.currentTimeMillis() - t0)
+                        }
+                        synchronized(partial) { partial.append(d) }
+                        onDelta(d)
+                    }
+                })
+
+                val r = b.run(sink)
+                if (result.isCompleted) return@launch
+
+                val failure = r.exceptionOrNull()
+                if (failure == null) {
+                    owner.compareAndSet(null, b.name)
+                    if (owner.get() == b.name) {
+                        if (!gotFirst) ProviderHealth.recordSpeed(b.name, System.currentTimeMillis() - t0)
+                        ProviderHealth.markOk(b.name)
+                        result.complete(r.getOrNull().orEmpty())
+                    }
+                } else {
+                    ProviderHealth.markFailed(b.name)
+                    failures.add("${b.name}: ${failure.message ?: "failed"}")
+                    if (owner.get() == b.name) {
+                        // died mid-reply: keep what was already shown
+                        val shown = synchronized(partial) { partial.toString() }
+                        result.complete(shown.ifBlank { null })
+                    } else {
+                        if (i + 1 < triggers.size) triggers[i + 1].complete(Unit)
+                        if (remaining.decrementAndGet() == 0) result.complete(null)
+                    }
+                }
+            }
+        }
+
+        val finished = withTimeoutOrNull(timeoutMs) { result.await() }
+        val text: String? = if (result.isCompleted) finished else {
+            val shown = synchronized(partial) { partial.toString() }
+            if (shown.isNotBlank()) shown else {
+                failures.add("Timed out waiting for a reply.")
+                null
+            }
+        }
+        // cut off whichever providers lost
+        coroutineContext.cancelChildren()
+        Pair(text, failures.toList())
     }
 }

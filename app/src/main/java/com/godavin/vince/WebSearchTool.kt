@@ -30,6 +30,16 @@ object WebSearchTool {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
+    // v2.5 - an ordinary lookup (basic depth) must never hold up the reply for
+    // long: connect in 3s, whole call done in 4s, otherwise it counts as "could
+    // not pull live data" and VINCE answers anyway. Deep research (advanced
+    // depth) keeps the slower client above.
+    private val fastClient = client.newBuilder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(4, TimeUnit.SECONDS)
+        .build()
+
     private val TRIGGER_PHRASES = listOf(
         "latest", "current", "currently", "recent", "recently", "this week",
         "this month", "this year", "today's", "today", "tonight", "yesterday",
@@ -127,11 +137,16 @@ object WebSearchTool {
      * the news index has nothing (timeless questions like "how does an FVG
      * work"). Returns blank on zero results. */
     suspend fun liveSearch(apiKey: String, query: String, days: Int): Result<String> {
+        val started = System.currentTimeMillis()
         val news = search(apiKey, query, topic = "news", days = days)
-        val newsText = news.getOrNull()
-        if (!newsText.isNullOrBlank()) return news
+        // v2.5 - a failed or timed-out news search is returned as-is (no second
+        // slow call); only a genuine "zero results" falls back to a general
+        // search, and only if the first call was quick.
+        if (news.isFailure) return news
+        if (!news.getOrNull().isNullOrBlank()) return news
+        if (System.currentTimeMillis() - started > 1500) return news
         val general = search(apiKey, query, topic = "general")
-        return if (general.isSuccess) general else (if (news.isFailure) news else general)
+        return if (general.isSuccess) general else news
     }
 
     private val QUESTION_STARTERS = listOf(
@@ -248,7 +263,7 @@ object WebSearchTool {
                     .post(body)
                     .build()
 
-                client.newCall(request).execute().use { response ->
+                (if (depth == "basic") fastClient else client).newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
                         return@withContext Result.failure(

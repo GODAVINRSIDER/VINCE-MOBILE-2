@@ -209,6 +209,164 @@ object OpenAiCompatibleClient {
         }
     }
 
+
+    // ------------------------------------------------------------------
+    // v2.5 - fast chat path (used by BrainRouter's provider race)
+    // ------------------------------------------------------------------
+
+    private val fastClient = client.newBuilder()
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .build()
+
+    // Groq's gpt-oss models reason before answering; "low" cuts that to a blink.
+    // If Groq ever rejects the setting, it is switched off and remembered.
+    @Volatile private var reasoningEffortOk = true
+
+    private fun fastRequestJson(
+        model: String,
+        userMessage: String,
+        maxTokens: Int,
+        reasoningEffort: String?,
+        stream: Boolean
+    ): JSONObject = JSONObject().apply {
+        put("model", model)
+        put("messages", JSONArray().put(
+            JSONObject().apply {
+                put("role", "user")
+                put("content", userMessage)
+            }
+        ))
+        put("max_tokens", maxTokens)
+        if (stream) put("stream", true)
+        if (reasoningEffort != null && reasoningEffortOk) put("reasoning_effort", reasoningEffort)
+    }
+
+    private fun isReasoningRejection(msg: String): Boolean =
+        msg.contains("(400)") && msg.contains("reasoning", ignoreCase = true)
+
+    /** One fast attempt, no sleep-and-retry. Whole reply at once. */
+    suspend fun chat(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        userMessage: String,
+        providerLabel: String,
+        maxTokens: Int = 1500,
+        reasoningEffort: String? = null
+    ): Result<String> {
+        if (apiKey.isBlank()) return Result.failure(IllegalStateException("No $providerLabel API key saved."))
+        for (attempt in 0..1) {
+            val usedEffort = reasoningEffort != null && reasoningEffortOk
+            val r = try {
+                val request = Request.Builder()
+                    .url(baseUrl)
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .post(
+                        fastRequestJson(model, userMessage, maxTokens, reasoningEffort, false)
+                            .toString().toRequestBody("application/json".toMediaType())
+                    )
+                    .build()
+                HttpStream.run(fastClient, request) { response ->
+                    val responseBody = response.body?.string().orEmpty()
+                    if (response.isSuccessful) {
+                        val reply = parseReply(responseBody)
+                        if (reply != null) Result.success(reply)
+                        else Result.failure<String>(Exception("$providerLabel responded with no readable text."))
+                    } else {
+                        Result.failure<String>(
+                            Exception("$providerLabel error (${response.code}): ${ApiErrors.short(responseBody)}")
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure<String>(e)
+            }
+            if (r.isSuccess) return r
+            val msg = r.exceptionOrNull()?.message.orEmpty()
+            if (usedEffort && isReasoningRejection(msg)) {
+                reasoningEffortOk = false
+                continue
+            }
+            return r
+        }
+        return Result.failure(Exception("$providerLabel rejected the request settings."))
+    }
+
+    /** Streaming version: [onDelta] gets each piece of text as it arrives (from a
+     * background thread); the full text is returned at the end. */
+    suspend fun chatStream(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        userMessage: String,
+        providerLabel: String,
+        maxTokens: Int = 1500,
+        reasoningEffort: String? = null,
+        onDelta: (String) -> Unit
+    ): Result<String> {
+        if (apiKey.isBlank()) return Result.failure(IllegalStateException("No $providerLabel API key saved."))
+        for (attempt in 0..1) {
+            val usedEffort = reasoningEffort != null && reasoningEffortOk
+            val r = try {
+                val request = Request.Builder()
+                    .url(baseUrl)
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Accept", "text/event-stream")
+                    .post(
+                        fastRequestJson(model, userMessage, maxTokens, reasoningEffort, true)
+                            .toString().toRequestBody("application/json".toMediaType())
+                    )
+                    .build()
+                HttpStream.run(fastClient, request) { response ->
+                    if (!response.isSuccessful) {
+                        val errBody = response.body?.string().orEmpty()
+                        return@run Result.failure<String>(
+                            Exception("$providerLabel error (${response.code}): ${ApiErrors.short(errBody)}")
+                        )
+                    }
+                    val full = StringBuilder()
+                    val reader = response.body!!.byteStream().bufferedReader()
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (!line.startsWith("data:")) continue
+                        val payload = line.removePrefix("data:").trim()
+                        if (payload.isEmpty()) continue
+                        if (payload == "[DONE]") break
+                        val piece = parseStreamPiece(payload)
+                        if (piece.isNotEmpty()) {
+                            full.append(piece)
+                            onDelta(piece)
+                        }
+                    }
+                    if (full.isBlank()) Result.failure<String>(Exception("$providerLabel responded with no readable text."))
+                    else Result.success(full.toString())
+                }
+            } catch (e: Exception) {
+                Result.failure<String>(e)
+            }
+            if (r.isSuccess) return r
+            val msg = r.exceptionOrNull()?.message.orEmpty()
+            if (usedEffort && isReasoningRejection(msg)) {
+                reasoningEffortOk = false
+                continue
+            }
+            return r
+        }
+        return Result.failure(Exception("$providerLabel rejected the request settings."))
+    }
+
+    /** Text of one streamed chunk. Reasoning tokens (a separate field) are ignored. */
+    private fun parseStreamPiece(payload: String): String {
+        return try {
+            val delta = JSONObject(payload).optJSONArray("choices")?.optJSONObject(0)
+                ?.optJSONObject("delta") ?: return ""
+            if (delta.isNull("content")) "" else delta.optString("content")
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
     private val TRANSIENT_CODES = setOf(500, 502, 503, 504)
 
     private fun sendRequest(

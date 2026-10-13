@@ -68,6 +68,17 @@ object VoiceOutput {
     }
 
     fun speak(text: String, persona: Persona = Persona.VINCE) {
+        speakInternal(text, persona, TextToSpeech.QUEUE_FLUSH)
+    }
+
+    /** v2.5 - for streamed replies: the first piece interrupts anything old
+     * ([first] = true), later pieces queue up behind it, so VINCE starts talking
+     * on the first finished sentence while the rest is still being written. */
+    fun speakChunk(text: String, persona: Persona, first: Boolean) {
+        speakInternal(text, persona, if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD)
+    }
+
+    private fun speakInternal(text: String, persona: Persona, queueMode: Int) {
         if (!ready || text.isBlank()) return
 
         if (persona == Persona.VINCE) {
@@ -95,7 +106,8 @@ object VoiceOutput {
         // The engine rejects input over ~4000 characters outright.
         val clean = stripMarkdownForSpeech(text).take(3900)
         utteranceCounter++
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "vince_utt_$utteranceCounter")
+        if (clean.isBlank()) return
+        tts?.speak(clean, queueMode, null, "vince_utt_$utteranceCounter")
     }
 
     /** Speaks and suspends until the speech ends, is interrupted, or a safety
@@ -147,5 +159,59 @@ object VoiceOutput {
     fun stop() {
         tts?.stop()
         finishPending()
+    }
+}
+
+/**
+ * v2.5 - feeds streamed text to the voice one finished sentence at a time.
+ * Call [feed] with each piece as it arrives and [finish] when the reply is done.
+ * Boundaries are ". ", "! ", "? " or a line break, so numbers like 2.5 or
+ * 3,250.40 are never cut in half. Very short first sentences are held back so
+ * the voice does not stutter out one-word chunks.
+ */
+class SentenceSpeaker(private val persona: Persona) {
+    private val buf = StringBuilder()
+    private var spokeAny = false
+
+    fun feed(delta: String) {
+        buf.append(delta)
+        flush(final = false)
+    }
+
+    fun finish() {
+        flush(final = true)
+    }
+
+    private fun flush(final: Boolean) {
+        while (true) {
+            val cut = findCut(final)
+            if (cut <= 0) break
+            val piece = buf.substring(0, cut).trim()
+            buf.delete(0, cut)
+            if (piece.isNotBlank()) {
+                VoiceOutput.speakChunk(piece, persona, first = !spokeAny)
+                spokeAny = true
+            }
+        }
+        if (final && buf.isNotBlank()) {
+            VoiceOutput.speakChunk(buf.toString().trim(), persona, first = !spokeAny)
+            spokeAny = true
+            buf.clear()
+        }
+    }
+
+    /** Index just after the last sentence end in the buffer, or -1. */
+    private fun findCut(final: Boolean): Int {
+        val minLen = if (spokeAny) 12 else 24
+        var i = 0
+        while (i < buf.length) {
+            val c = buf[i]
+            val atEnd = i == buf.length - 1
+            val isBreak = c == '\n' ||
+                ((c == '.' || c == '!' || c == '?') && (if (atEnd) final else buf[i + 1].isWhitespace()))
+            if (isBreak && i + 1 >= minLen) return i + 1
+            i++
+        }
+        return -1
     }
 }

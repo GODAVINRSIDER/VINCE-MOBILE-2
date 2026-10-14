@@ -53,6 +53,9 @@ object AlertLog {
         AlertScheduler.T_BRIEFING -> "Briefing"
         AlertScheduler.T_JOURNAL -> "Journal"
         AlertScheduler.T_NEWS -> "News"
+        "pro_morning" -> "Check-in (morning)"
+        "pro_midday" -> "Check-in (midday)"
+        "pro_evening" -> "Check-in (evening)"
         else -> type
     }
 

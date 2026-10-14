@@ -18,6 +18,7 @@ object Notifs {
     const val CH_BRIEFING = "vince_briefing"
     const val CH_JOURNAL = "vince_journal"
     const val CH_REMINDER = "vince_reminders_v2"
+    const val CH_PROACTIVE = "vince_proactive"
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -26,6 +27,7 @@ object Notifs {
         nm.createNotificationChannel(NotificationChannel(CH_NEWS, "News heads-up", NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel(CH_BRIEFING, "Daily briefing", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_JOURNAL, "Journal check-in", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_PROACTIVE, "Check-ins from VINCE, CLARA and DAVINA", NotificationManager.IMPORTANCE_DEFAULT))
         val reminderCh = NotificationChannel(CH_REMINDER, "VINCE Reminders", NotificationManager.IMPORTANCE_HIGH).apply {
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)

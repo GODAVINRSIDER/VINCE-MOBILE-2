@@ -15,7 +15,7 @@ object ProviderHealth {
 
     // Rough starting guesses (ms to first reply); real timings replace them fast.
     private val speedMs = ConcurrentHashMap<String, Long>(
-        mapOf("Gemini" to 900L, "Groq" to 700L, "OpenRouter" to 3000L)
+        mapOf("Gemini" to 900L, "Groq" to 700L, "Mistral" to 1100L, "Cloudflare" to 1600L, "OpenRouter" to 3000L)
     )
 
     /** [cooldownMs] = how long to skip this provider (default 45s). A dead key or

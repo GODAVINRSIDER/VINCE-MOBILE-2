@@ -259,7 +259,9 @@ class SentenceSpeaker(private val persona: Persona) {
 
     /** Index just after the last sentence end in the buffer, or -1. */
     private fun findCut(final: Boolean): Int {
-        val minLen = if (spokeAny) 12 else 24
+        // v2.7 - longer pieces after the first one: each piece is a separate ElevenLabs request,
+        // and many tiny ones sounded choppy.
+        val minLen = if (spokeAny) 45 else 26
         var i = 0
         while (i < buf.length) {
             val c = buf[i]

@@ -2,15 +2,12 @@ package com.godavin.vince
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -18,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,11 +23,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 
 /** Settings card: ElevenLabs as the main voice, phone voice as the fallback. */
 @Composable
 fun VoiceSettingsSection() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checkResult by remember { mutableStateOf<String?>(null) }
     var key by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.ELEVENLABS)) }
     var enabled by remember { mutableStateOf(ElevenVoice.isEnabled(context)) }
     var vince by remember { mutableStateOf(ElevenVoice.voiceId(context, Persona.VINCE)) }
@@ -81,10 +82,9 @@ fun VoiceSettingsSection() {
         Text("DAVINA voice ID", fontSize = 12.sp)
         OutlinedTextField(value = davina, onValueChange = { davina = it; saved = false }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
-        Spacer(modifier = Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val pad = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-            Button(onClick = {
+        Spacer(modifier = Modifier.height(12.dp))
+        ButtonGrid(
+            BtnSpec("Save voice settings", primary = true) {
                 ApiKeyStore.saveKey(context, Provider.ELEVENLABS, key.trim())
                 ElevenVoice.reloadKey(context)
                 ElevenVoice.clearProblems()
@@ -93,16 +93,35 @@ fun VoiceSettingsSection() {
                 ElevenVoice.setVoiceId(context, Persona.CLARA, clara)
                 ElevenVoice.setVoiceId(context, Persona.DAVINA, davina)
                 saved = true
+                checkResult = null
                 tick++
-            }, contentPadding = pad) { Text("Save voice settings", fontSize = 12.sp) }
-            OutlinedButton(onClick = {
-                VoiceOutput.speak("Hi, this is VINCE. How do I sound?", Persona.VINCE); tick++
-            }, contentPadding = pad) { Text("Test", fontSize = 12.sp) }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-            val pad = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-            OutlinedButton(onClick = { VoiceOutput.speak("Hi, this is Clara.", Persona.CLARA); tick++ }, contentPadding = pad) { Text("Test CLARA", fontSize = 12.sp) }
-            OutlinedButton(onClick = { VoiceOutput.speak("Hi, this is Davina.", Persona.DAVINA); tick++ }, contentPadding = pad) { Text("Test DAVINA", fontSize = 12.sp) }
+            },
+            BtnSpec("Test VINCE") { VoiceOutput.speak("Hi, this is VINCE. How do I sound?", Persona.VINCE); tick++ },
+            BtnSpec("Test CLARA") { VoiceOutput.speak("Hi, this is Clara.", Persona.CLARA); tick++ },
+            BtnSpec("Test DAVINA") { VoiceOutput.speak("Hi, this is Davina.", Persona.DAVINA); tick++ },
+            perRow = 2
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        VButton(
+            text = "Check ElevenLabs connection",
+            onClick = {
+                checkResult = "Checking..."
+                scope.launch {
+                    val parts = listOf(Persona.VINCE, Persona.CLARA, Persona.DAVINA).map { p ->
+                        // use what is typed on screen, not only what was saved
+                        val typed = when (p) { Persona.VINCE -> vince; Persona.CLARA -> clara; Persona.DAVINA -> davina }
+                        if (typed.isNotBlank()) ElevenVoice.setVoiceId(context, p, typed)
+                        if (key.isNotBlank()) { ApiKeyStore.saveKey(context, Provider.ELEVENLABS, key.trim()); ElevenVoice.reloadKey(context) }
+                        "${p.name}: " + ElevenVoice.diagnose(context, p)
+                    }
+                    checkResult = parts.joinToString("\n")
+                    tick++
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        checkResult?.let {
+            Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
         }
         if (saved) Text("Saved. Tap Test to hear it.", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(top = 6.dp))

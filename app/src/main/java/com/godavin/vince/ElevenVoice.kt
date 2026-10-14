@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -37,6 +38,8 @@ import java.util.concurrent.atomic.AtomicInteger
 object ElevenVoice {
     private const val NAME = "ElevenLabs"
     private const val MODEL = "eleven_flash_v2_5"
+    // v2.7 - last attempt for a sentence uses this model before the phone voice is allowed to take over
+    private const val ALT_MODEL = "eleven_turbo_v2_5"
     private const val SAMPLE_RATE = 24000
     private const val PREFS = "vince_voice_prefs"
     private const val KEY_ENABLED = "eleven_enabled"
@@ -49,7 +52,7 @@ object ElevenVoice {
     )
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
@@ -227,8 +230,17 @@ object ElevenVoice {
 
     // ---------------------------------------------------------------- download
 
+    // v2.7 - the sentence before this one (same reply), sent to ElevenLabs as "previous_text" so
+    // the tone and rhythm carry on from one sentence to the next instead of restarting each time.
+    @Volatile private var prevText: String = ""
+    @Volatile private var prevEpoch: Int = -1
+
+    // A queued piece that was looked at but belongs to the next round.
+    private var carry: Req? = null
+
     private suspend fun fetcherLoop() {
-        for (r in reqs) {
+        while (true) {
+            val r = carry?.also { carry = null } ?: reqs.receive()
             try {
                 if (r.epoch != epoch) {
                     r.signal?.complete(Unit)
@@ -238,14 +250,32 @@ object ElevenVoice {
                     pcm.trySend(Done(r.epoch, r.signal))
                     continue
                 }
-                if (fetch(r.epoch, r.text, r.persona)) {
-                    // Nothing could be played for this sentence. Hand the phone voice the
-                    // WHOLE rest of the reply as ONE utterance - speaking it sentence by
+
+                // v2.7 - very short pieces ("Okay.", "Right.") became their own request and
+                // sounded choppy. Join short neighbours into one request so the voice flows.
+                var text: String = r.text
+                var joined = 1
+                if (text.length < 60) {
+                    while (text.length < 200) {
+                        val n = reqs.tryReceive().getOrNull() ?: break
+                        if (n.epoch != r.epoch || n.text == null || n.persona != r.persona) {
+                            carry = n
+                            break
+                        }
+                        text += " " + n.text
+                        joined++
+                    }
+                    if (joined > 1) active.addAndGet(-(joined - 1))
+                }
+
+                if (fetch(r.epoch, text, r.persona)) {
+                    // Nothing could be played for this sentence even after retrying. Hand the phone
+                    // voice the WHOLE rest of the reply as ONE utterance - speaking it sentence by
                     // sentence left a long gap after every full stop.
-                    var combined: String? = r.text
+                    var combined: String? = text
                     var merged = 1
                     while (true) {
-                        val next = reqs.tryReceive().getOrNull() ?: break
+                        val next = carry?.also { carry = null } ?: reqs.tryReceive().getOrNull() ?: break
                         if (next.epoch != epoch) { next.signal?.complete(Unit); continue }
                         if (next.text == null) {
                             pcm.trySend(Fail(r.epoch, combined!!, r.persona))
@@ -265,62 +295,98 @@ object ElevenVoice {
         }
     }
 
-    /** @return true if nothing could be played for this sentence (caller falls back). */
+    private enum class Outcome { OK, RETRY, GIVE_UP }
+
+    /**
+     * @return true if nothing could be played for this sentence (caller falls back).
+     *
+     * v2.7 - ElevenLabs is tried HARDER before the phone voice takes over: a dropped
+     * connection, a busy server (429/5xx) is retried up to twice (the last time with a second
+     * ElevenLabs model). Only a wrong key, an empty quota or a rejected voice ID hands over at once.
+     * After three failed tries the phone voice covers just this reply and ElevenLabs is tried
+     * again after 8 seconds (it used to be switched off for 30 seconds after one blip).
+     */
     private suspend fun fetch(e: Int, text: String, persona: Persona): Boolean {
         val ctx = app
         if (ctx == null || cachedKey.isBlank() || ProviderHealth.coolingDown(NAME)) return true
         val vid = voiceId(ctx, persona)
         if (voiceBad(vid)) return true
+        for (attempt in 0..2) {
+            if (e != epoch) return false
+            val model = if (attempt == 2) ALT_MODEL else MODEL
+            when (attemptFetch(e, text, persona, vid, model)) {
+                Outcome.OK -> {
+                    prevText = text
+                    prevEpoch = e
+                    return false
+                }
+                Outcome.GIVE_UP -> return true
+                Outcome.RETRY -> delay(350L * (attempt + 1))
+            }
+        }
+        ProviderHealth.markFailed(NAME, 8_000L)
+        return true
+    }
+
+    private fun errorDetail(err: String): String = try {
+        val d = JSONObject(err).opt("detail")
+        if (d is JSONObject) d.optString("status") + " " + d.optString("message") else d?.toString().orEmpty()
+    } catch (x: Exception) { err.take(120) }
+
+    private suspend fun attemptFetch(e: Int, text: String, persona: Persona, vid: String, model: String): Outcome {
         var sentAny = false
+        var outcome = Outcome.OK
         try {
             val body = JSONObject()
                 .put("text", text)
-                .put("model_id", MODEL)
+                .put("model_id", model)
                 .put("voice_settings", JSONObject().put("stability", 0.5).put("similarity_boost", 0.75))
-                .toString()
+            if (prevEpoch == e && prevText.isNotBlank()) body.put("previous_text", prevText.takeLast(300))
             val request = Request.Builder()
                 .url("https://api.elevenlabs.io/v1/text-to-speech/$vid/stream?output_format=pcm_24000")
                 .addHeader("xi-api-key", cachedKey)
                 .addHeader("Accept", "application/octet-stream")
-                .post(body.toRequestBody("application/json".toMediaType()))
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             val ok = HttpStream.run(client, request) { resp ->
                 if (!resp.isSuccessful) {
                     val err = resp.body?.string().orEmpty()
-                    val detail = try {
-                        val d = JSONObject(err).opt("detail")
-                        if (d is JSONObject) d.optString("status") + " " + d.optString("message") else d?.toString().orEmpty()
-                    } catch (x: Exception) { err.take(120) }
+                    val detail = errorDetail(err)
                     lastError = "${persona.name}: HTTP ${resp.code} ${detail.trim().take(140)}"
                     val keyOrQuota = resp.code == 401 || err.contains("quota_exceeded", ignoreCase = true)
                     when {
                         // wrong key or no credit left: affects every voice
-                        keyOrQuota -> ProviderHealth.markFailed(NAME, 30 * 60_000L)
+                        keyOrQuota -> {
+                            ProviderHealth.markFailed(NAME, 30 * 60_000L)
+                            outcome = Outcome.GIVE_UP
+                        }
                         // this voice ID is the problem (not found / needs a paid plan / bad request)
                         resp.code == 400 || resp.code == 402 || resp.code == 403 ||
-                            resp.code == 404 || resp.code == 422 ->
+                            resp.code == 404 || resp.code == 422 -> {
                             badVoices[vid] = System.currentTimeMillis() + 30 * 60_000L
-                        // busy / temporary
-                        else -> ProviderHealth.markFailed(NAME, 30_000L)
+                            outcome = Outcome.GIVE_UP
+                        }
+                        // busy / too many requests / temporary: worth another try
+                        else -> outcome = Outcome.RETRY
                     }
                     return@run false
                 }
                 val src = resp.body!!.byteStream()
                 val buf = ByteArray(4096)
-                var carry = -1
+                var carryByte = -1
                 while (true) {
                     if (e != epoch) return@run true            // cut off by a newer reply
                     val n = src.read(buf)
                     if (n < 0) break
                     if (n == 0) continue
                     // keep every chunk an even number of bytes (16-bit samples)
-                    val total = n + (if (carry >= 0) 1 else 0)
+                    val total = n + (if (carryByte >= 0) 1 else 0)
                     val out = ByteArray(total - (total % 2))
                     var o = 0
                     var i = 0
-                    if (carry >= 0) { out[o++] = carry.toByte(); carry = -1 }
+                    if (carryByte >= 0) { out[o++] = carryByte.toByte(); carryByte = -1 }
                     while (o < out.size) out[o++] = buf[i++]
-                    if (i < n) carry = buf[i].toInt() and 0xFF
+                    if (i < n) carryByte = buf[i].toInt() and 0xFF
                     if (out.isNotEmpty()) {
                         sentAny = true
                         pcm.trySend(Data(e, out))
@@ -328,16 +394,64 @@ object ElevenVoice {
                 }
                 true
             }
-            if (!ok && !sentAny) return true
+            if (!ok && !sentAny) return outcome
             pcm.trySend(End(e))
-            return false
+            lastError = ""
+            return Outcome.OK
         } catch (ex: Exception) {
-            if (e != epoch) return false
+            if (e != epoch) return Outcome.OK
             lastError = "${persona.name}: ${ex.message ?: ex.javaClass.simpleName}".take(160)
-            ProviderHealth.markFailed(NAME, 30_000L)
-            if (!sentAny) return true
-            pcm.trySend(End(e))
-            return false
+            if (sentAny) {
+                pcm.trySend(End(e))
+                return Outcome.OK
+            }
+            return Outcome.RETRY
+        }
+    }
+
+    // ---------------------------------------------------------------- diagnose
+
+    private fun explain(code: Int, detail: String): String {
+        val d = detail.lowercase()
+        return when {
+            code == 401 -> "ElevenLabs rejected the key (HTTP 401). Copy the whole key again from elevenlabs.io > Developers > API keys."
+            d.contains("quota") -> "The ElevenLabs account is out of credits (quota exceeded). It comes back at the next reset or after a top-up."
+            code == 402 || d.contains("paid_plan") || code == 403 ->
+                "ElevenLabs says this voice needs a paid plan through the API (HTTP $code). Pick a different voice ID, or use a voice from My Voices."
+            code == 404 -> "ElevenLabs can't find that voice ID (HTTP 404). Copy the Voice ID again from ElevenLabs > Voices."
+            code == 422 || code == 400 -> "ElevenLabs didn't accept the request (HTTP $code): ${detail.trim().take(120)}"
+            code == 429 -> "ElevenLabs is busy or you hit the request limit (HTTP 429). Try again in a few seconds."
+            else -> "ElevenLabs answered HTTP $code ${detail.trim().take(120)}"
+        }
+    }
+
+    /** Settings > "Check ElevenLabs": one tiny request that says exactly what ElevenLabs answered. Nothing is played. */
+    suspend fun diagnose(context: Context, persona: Persona): String = withContext(Dispatchers.IO) {
+        val key = try { ApiKeyStore.getKey(context, Provider.ELEVENLABS) } catch (e: Exception) { "" }
+        if (key.isBlank()) return@withContext "No ElevenLabs key saved yet. Paste it above and tap Save voice settings."
+        val vid = voiceId(context, persona)
+        try {
+            val body = JSONObject().put("text", "Check.").put("model_id", MODEL).toString()
+            val request = Request.Builder()
+                .url("https://api.elevenlabs.io/v1/text-to-speech/$vid/stream?output_format=pcm_24000")
+                .addHeader("xi-api-key", key)
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            val t0 = System.currentTimeMillis()
+            client.newCall(request).execute().use { resp ->
+                val ms = System.currentTimeMillis() - t0
+                if (resp.isSuccessful) {
+                    val bytes = resp.body?.bytes()?.size ?: 0
+                    ProviderHealth.markOk(NAME)
+                    badVoices.remove(vid)
+                    lastError = ""
+                    "Working: ElevenLabs answered for ${persona.name} in $ms ms ($bytes bytes of audio). Voice ID $vid is fine."
+                } else {
+                    explain(resp.code, errorDetail(resp.body?.string().orEmpty()))
+                }
+            }
+        } catch (e: Exception) {
+            "Couldn't reach ElevenLabs (${e.message ?: e.javaClass.simpleName}). Check the phone's internet connection."
         }
     }
 

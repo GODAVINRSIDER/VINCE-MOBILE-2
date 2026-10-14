@@ -84,14 +84,15 @@ fun PhoneControlSection() {
         )
         StatusLine("Step 2 - Phone control (Accessibility)", if (accLive) "ON" else if (accOn) "On, starting..." else "OFF")
         StatusLine("Step 3 - Notification access", if (notifOn) "ON" else "OFF")
-        Button(
+        VButton(
+            text = "Set up phone control (guided)", primary = true,
             onClick = {
                 guided = true
                 lastDone = PhoneSetup.doneCount(context)
                 PhoneSetup.openNextStep(context)
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Set up phone control (guided)") }
+        )
         Text(
             "Works on any phone, no laptop needed. VINCE opens each screen for you, tells you the exact taps, and moves to " +
                 "the next step by itself when you come back.",
@@ -100,15 +101,14 @@ fun PhoneControlSection() {
         )
 
         StatusLine("Phone control (Accessibility)", if (accLive) "ON" else if (accOn) "On, starting..." else "OFF")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
+        ButtonGrid(
+            BtnSpec("1. Accessibility", primary = true) {
                 context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("1. Accessibility", fontSize = 12.sp) }
-            OutlinedButton(onClick = { openAppInfo(context) },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("App info", fontSize = 12.sp) }
-            OutlinedButton(onClick = { tick++ },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Refresh", fontSize = 12.sp) }
-        }
+            },
+            BtnSpec("App info") { openAppInfo(context) },
+            BtnSpec("Refresh") { tick++ },
+            perRow = 3
+        )
         Text(
             "Steps: Accessibility > Installed apps (or Downloaded apps) > VINCE phone control > On. If Android says " +
                 "\"restricted setting\", press App info > top-right menu (three dots) > Allow restricted settings, then try again.",
@@ -118,9 +118,9 @@ fun PhoneControlSection() {
 
         Spacer(modifier = Modifier.height(12.dp))
         StatusLine("Notification access (read messages, reply)", if (notifOn) "ON" else "OFF")
-        OutlinedButton(onClick = {
+        VButton(text = "2. Notification access", onClick = {
             context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("2. Notification access", fontSize = 12.sp) }
+        }, modifier = Modifier.fillMaxWidth())
 
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -138,8 +138,7 @@ fun PhoneControlSection() {
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(onClick = { PhoneAgent.stop(context) },
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("STOP phone control now", fontSize = 12.sp) }
+        VButton(text = "STOP phone control now", onClick = { PhoneAgent.stop(context) }, modifier = Modifier.fillMaxWidth())
     }
 }
 

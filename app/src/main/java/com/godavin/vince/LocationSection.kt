@@ -6,15 +6,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +39,8 @@ fun LocationSection() {
     var perm by remember { mutableStateOf(LocationTracker.hasPermission(context)) }
     var bg by remember { mutableStateOf(LocationTracker.hasBackground(context)) }
     var nowText by remember { mutableStateOf<String?>(null) }
+    var gps by remember { mutableStateOf(LocationStore.gpsEnabled(context)) }
+    var showPlaces by remember { mutableStateOf(false) }
 
     val bgLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         bg = LocationTracker.hasBackground(context)
@@ -93,45 +92,72 @@ fun LocationSection() {
             })
         }
 
-        Text("Keep places for:", fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val pad = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-            if (hours == 48) Button(onClick = {}, contentPadding = pad) { Text("48 hours", fontSize = 12.sp) }
-            else OutlinedButton(onClick = {
-                hours = 48; LocationStore.setRetentionHours(context, 48); count = LocationStore.all(context).size
-            }, contentPadding = pad) { Text("48 hours", fontSize = 12.sp) }
-            if (hours == 168) Button(onClick = {}, contentPadding = pad) { Text("7 days", fontSize = 12.sp) }
-            else OutlinedButton(onClick = {
-                hours = 168; LocationStore.setRetentionHours(context, 168); count = LocationStore.all(context).size
-            }, contentPadding = pad) { Text("7 days", fontSize = 12.sp) }
+        // v2.7 - exact (GPS) places, optional because it uses more battery
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Exact places (GPS)", fontSize = 14.sp)
+                Text(
+                    "Also uses GPS for the place memory: tighter positions, a little more battery. \"Where am I\" always uses GPS either way.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                )
+            }
+            Switch(checked = gps, onCheckedChange = { on ->
+                gps = on
+                LocationStore.setGpsEnabled(context, on)
+                if (LocationStore.trackingEnabled(context) && perm) LocationTracker.setTracking(context, true)
+            })
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("$count places saved right now.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        nowText?.let { Text("Now: $it", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary) }
+        Text("Keep places for:", fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
+        ButtonGrid(
+            BtnSpec("48 hours", primary = hours == 48) {
+                hours = 48; LocationStore.setRetentionHours(context, 48); count = LocationStore.all(context).size
+            },
+            BtnSpec("7 days", primary = hours == 168) {
+                hours = 168; LocationStore.setRetentionHours(context, 168); count = LocationStore.all(context).size
+            },
+            perRow = 2
+        )
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val pad = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-            OutlinedButton(onClick = {
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("$count places saved right now.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        nowText?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        ButtonGrid(
+            BtnSpec("Where am I now?") {
                 if (!perm) {
                     fgLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                 } else {
-                    nowText = "checking..."
+                    nowText = "Getting an exact fix..."
                     scope.launch {
-                        nowText = LocationTracker.current(context)?.name ?: "no location fix (is GPS on?)"
+                        nowText = LocationTools.exactReply(context)
                         count = LocationStore.all(context).size
                     }
                 }
-            }, contentPadding = pad) { Text("Where am I now?", fontSize = 12.sp) }
-            OutlinedButton(onClick = {
-                LocationStore.clear(context); count = 0
-            }, contentPadding = pad) { Text("Clear history now", fontSize = 12.sp) }
-            OutlinedButton(onClick = {
+            },
+            BtnSpec(if (showPlaces) "Hide my places" else "Show my places") {
+                showPlaces = !showPlaces
+                count = LocationStore.all(context).size
+            },
+            BtnSpec("Clear history now") {
+                LocationStore.clear(context); count = 0; showPlaces = false
+            },
+            BtnSpec("Refresh") {
                 perm = LocationTracker.hasPermission(context)
                 bg = LocationTracker.hasBackground(context)
                 count = LocationStore.all(context).size
-            }, contentPadding = pad) { Text("Refresh", fontSize = 12.sp) }
+            },
+            perRow = 2
+        )
+
+        if (showPlaces) {
+            Spacer(modifier = Modifier.height(10.dp))
+            val list = remember(count, hours, showPlaces) { LocationTools.placesListText(context) }
+            Text(
+                if (list.isBlank()) "No places recorded yet. They appear here as you move around while place memory is on." else list,
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+            )
         }
     }
 }

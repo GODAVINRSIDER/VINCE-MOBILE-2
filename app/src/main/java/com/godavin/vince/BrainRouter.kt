@@ -54,6 +54,17 @@ object BrainRouter {
             "asks for history. Frame all advice, guidance and examples for today and what is " +
             "practical now."
 
+    // v2.7 - JARVIS/FRIDAY-style: offers a take and a next step without being asked, pushes back,
+    // and is not only about trading.
+    private const val PROACTIVE_STYLE =
+        "Personality: you are a JARVIS/FRIDAY-style partner, not a passive assistant waiting for orders. " +
+            "After you answer, when it genuinely helps, add ONE sharp opinion, a risk you can see, or a concrete " +
+            "next step the user did not ask for, then stop. Give your honest take and push back politely when the " +
+            "user looks wrong or about to make a mistake; never just agree to please. Do not end replies with " +
+            "generic offers like 'let me know if you need anything'. Not everything is about trading: the user " +
+            "also builds their own apps and tools, runs a brand and a business, studies, and has a life. Follow " +
+            "the topic they are actually on, and keep it natural and brief, one idea at a time."
+
     // Capabilities awareness - the personas were describing themselves as
     // "text-only" with no device access, because nothing in the prompt told
     // them what the app can actually do. Keep this list TRUTHFUL: update it
@@ -73,7 +84,7 @@ object BrainRouter {
             "news heads-ups, a daily briefing and an end-of-day journal check-in, keep the " +
             "user's trading rules and today's plan, search the web and run multi-step " +
             "research (when a search key is set), remember facts across every chat, float " +
-            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), operate the phone when Phone control is on (read the screen, tap, type, scroll, open apps, send WhatsApp/SMS or notification replies after the user says yes, and prepare/place MetaTrader 5 orders only from a complete user instruction after an explicit yes, with a lot cap), read incoming message notifications, draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, and make in-app calls to PC-VINCE. You cannot " +
+            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), operate the phone when Phone control is on (read the screen, tap, type, scroll, open apps, send WhatsApp/SMS or notification replies after the user says yes, and prepare/place MetaTrader 5 orders only from a complete user instruction after an explicit yes, with a lot cap), read incoming message notifications, draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, make in-app calls to PC-VINCE, tell the user their exact location (street and area, coordinates, accuracy) and list the places they have been in the last 48 hours or 7 days when place memory is switched on, and send proactive morning, midday and evening check-ins at times set in Settings. You cannot " +
             "place or manage trades from the phone, cannot generate AI pictures (that was removed - you can only draw chart patterns by code), you are not linked to any trading " +
             "account (so you do not know balance, open trades or profit), you cannot place " +
             "calls or send messages by yourself (the user presses the button), cannot flip " +
@@ -205,7 +216,8 @@ object BrainRouter {
         userMessage: String,
         persona: Persona,
         history: List<ChatMessage>,
-        onStatus: ((String) -> Unit)? = null
+        onStatus: ((String) -> Unit)? = null,
+        allowSearch: Boolean = true
     ): Prepared {
         // Stage 13 - durable memory. Stage 14 - persona tone, so the
         // active persona actually reasons/responds differently, not just
@@ -277,9 +289,9 @@ object BrainRouter {
         // latest, current, today, news, outlook...). wide = any real question or
         // substantive request. Only tiny small talk skips Tavily. Local commands
         // (time, reminders, phone actions) never reach this function at all.
-        val forced = WebSearchTool.mustSearch(userMessage)
-        val searchNeeded = forced || WebSearchTool.shouldSearch(userMessage)
-        val timeSensitive = forced || WebSearchTool.needsSearch(userMessage)
+        val forced = allowSearch && WebSearchTool.mustSearch(userMessage)
+        val searchNeeded = allowSearch && (forced || WebSearchTool.shouldSearch(userMessage))
+        val timeSensitive = allowSearch && (forced || WebSearchTool.needsSearch(userMessage))
 
         fun groundingPrefix() =
             "LIVE WEB RESULTS, fetched seconds ago. This is the newest information available and " +
@@ -295,14 +307,14 @@ object BrainRouter {
         val recencyDays = if (forced) 120 else SEARCH_RECENCY_DAYS
 
         var relaxConciseness = false
-        val willSearch = tavilyKey.isNotBlank() && (DeepResearch.isResearchRequest(userMessage) || searchNeeded)
+        val willSearch = allowSearch && tavilyKey.isNotBlank() && (DeepResearch.isResearchRequest(userMessage) || searchNeeded)
         if (willSearch) {
             onStatus?.invoke(
                 if (DeepResearch.isResearchRequest(userMessage)) Narration.researching(persona)
                 else Narration.searching(persona, searchQuery)
             )
         }
-        val searchBlock = if (tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
+        val searchBlock = if (allowSearch && tavilyKey.isNotBlank() && DeepResearch.isResearchRequest(userMessage)) {
             val deepResult = DeepResearch.research(context, userMessage)
             if (deepResult != null) {
                 relaxConciseness = true
@@ -316,7 +328,7 @@ object BrainRouter {
                 WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays)
                     .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
             }
-        } else if (tavilyKey.isNotBlank() && searchNeeded) {
+        } else if (allowSearch && tavilyKey.isNotBlank() && searchNeeded) {
             WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays)
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
         } else {
@@ -358,7 +370,7 @@ object BrainRouter {
         }
 
         val contextBlock = listOf(
-            persona.roleDescription, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, styleInstruction,
+            persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, styleInstruction,
             currentDateGrounding(mayGreet(history)), memoryBlock, locationBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }
@@ -404,8 +416,9 @@ object BrainRouter {
         userMessage: String,
         persona: Persona = Persona.VINCE,
         history: List<ChatMessage> = emptyList(),
-        onStatus: ((String) -> Unit)? = null
-    ): String = route(context, userMessage, persona, history, null, onStatus)
+        onStatus: ((String) -> Unit)? = null,
+        allowSearch: Boolean = true
+    ): String = route(context, userMessage, persona, history, null, onStatus, allowSearch)
 
     /** v2.5 - same answer, but [onDelta] receives the text piece by piece as it is
      * written (called from a background thread). The full reply is still returned. */
@@ -424,12 +437,13 @@ object BrainRouter {
         persona: Persona,
         history: List<ChatMessage>,
         onDelta: DeltaSink?,
-        onStatus: ((String) -> Unit)?
+        onStatus: ((String) -> Unit)?,
+        allowSearch: Boolean = true
     ): String {
-        val prepared = prepare(context, userMessage, persona, history, onStatus)
+        val prepared = prepare(context, userMessage, persona, history, onStatus, allowSearch)
         val backends = buildBackends(context, prepared)
         if (backends.isEmpty()) {
-            return "No API keys saved yet - add at least one (Gemini, Groq, or OpenRouter) in Settings."
+            return "No API keys saved yet - add at least one (Gemini, Groq, Mistral, Cloudflare or OpenRouter) in Settings."
         }
         val timeout = if (prepared.maxTokens > CHAT_MAX_TOKENS) RESEARCH_TIMEOUT_MS else OVERALL_TIMEOUT_MS
         val onSlow: (() -> Unit)? = if (onStatus == null) null else ({ onStatus(Narration.slow(persona)) })
@@ -465,6 +479,25 @@ object BrainRouter {
             }
         }
 
+        // v2.7 - extra backup brains. Both speak the same "OpenAI-compatible" format as Groq.
+        val mistralKey = ApiKeyStore.getKey(context, Provider.MISTRAL)
+        if (mistralKey.isNotBlank()) {
+            val model = BrainPrefs.mistralModel(context).ifBlank { BrainPrefs.MISTRAL_DEFAULT }
+            list += Backend("Mistral") { sink ->
+                val url = "https://api.mistral.ai/v1/chat/completions"
+                if (sink == null) OpenAiCompatibleClient.chat(url, mistralKey, model, msg, "Mistral", max, null)
+                else OpenAiCompatibleClient.chatStream(url, mistralKey, model, msg, "Mistral", max, null, sink)
+            }
+        }
+
+        val cfKey = ApiKeyStore.getKey(context, Provider.CLOUDFLARE)
+        val cfAccount = ApiKeyStore.getKey(context, Provider.CLOUDFLARE_ACCOUNT)
+        if (cfKey.isNotBlank() && cfAccount.isNotBlank()) {
+            val models = (listOf(BrainPrefs.cloudflareModel(context)) + BrainPrefs.CLOUDFLARE_DEFAULTS)
+                .filter { it.isNotBlank() }.distinct()
+            list += Backend("Cloudflare") { sink -> cloudflareChat(cfAccount, cfKey, models, msg, max, sink) }
+        }
+
         val openRouterKey = ApiKeyStore.getKey(context, Provider.OPENROUTER)
         if (openRouterKey.isNotBlank()) {
             list += Backend("OpenRouter") { sink ->
@@ -481,6 +514,27 @@ object BrainRouter {
 
         val order = ProviderHealth.order(list.map { it.name })
         return list.sortedBy { order.indexOf(it.name) }
+    }
+
+    /** Cloudflare Workers AI (OpenAI-compatible). The whole answer arrives at once; a retired model name
+     * falls through to the next one in [models] instead of failing the provider. */
+    private suspend fun cloudflareChat(
+        account: String, token: String, models: List<String>, msg: String, max: Int, sink: DeltaSink?
+    ): Result<String> {
+        val url = "https://api.cloudflare.com/client/v4/accounts/$account/ai/v1/chat/completions"
+        var last: Result<String> = Result.failure(Exception("Cloudflare: no model to try."))
+        for (m in models) {
+            val r = OpenAiCompatibleClient.chat(url, token, m, msg, "Cloudflare", max, null)
+            if (r.isSuccess) {
+                r.getOrNull()?.let { text -> sink?.invoke(text) }
+                return r
+            }
+            last = r
+            val why = r.exceptionOrNull()?.message.orEmpty()
+            // only a bad/retired model name is worth trying the next model for
+            if (!(why.contains("(400)") || why.contains("(404)") || why.contains("(422)"))) break
+        }
+        return last
     }
 
     /**
@@ -506,7 +560,7 @@ object BrainRouter {
         triggers[0].complete(Unit)
         for (i in 1 until backends.size) {
             launch {
-                delay(if (i == 1) HEDGE_SECOND_MS else HEDGE_THIRD_MS)
+                delay(if (i == 1) HEDGE_SECOND_MS else HEDGE_THIRD_MS + (i - 2) * 1500L)
                 if (i == 1 && !result.isCompleted && owner.get() == null) onSlow?.invoke()
                 triggers[i].complete(Unit)
             }

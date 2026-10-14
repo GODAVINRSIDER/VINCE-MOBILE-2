@@ -196,6 +196,11 @@ fun SettingsScreen(onBack: () -> Unit) {
     var openRouterText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.OPENROUTER)) }
     var finnhubText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.FINNHUB)) }
     var tavilyText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.TAVILY)) }
+    var mistralText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.MISTRAL)) }
+    var mistralModel by remember { mutableStateOf(BrainPrefs.mistralModel(context)) }
+    var cfTokenText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.CLOUDFLARE)) }
+    var cfAccountText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.CLOUDFLARE_ACCOUNT)) }
+    var cfModel by remember { mutableStateOf(BrainPrefs.cloudflareModel(context)) }
     var saved by remember { mutableStateOf(false) }
 
     // Fix - this screen grew to 4 stacked sections (API keys, System
@@ -218,9 +223,9 @@ fun SettingsScreen(onBack: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Chat tries these in order - Gemini, then Groq, then OpenRouter - " +
-                "falling through automatically if one is unavailable or over quota. " +
-                "Leave any of them blank to skip that provider.",
+            text = "Chat tries these as a team - Gemini, Groq, Mistral, Cloudflare and OpenRouter - " +
+                "and the fastest healthy one answers, falling through automatically if one is " +
+                "unavailable or over quota. Leave any of them blank to skip that provider.",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -254,6 +259,45 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(16.dp))
 
+            Text("Mistral API key (optional backup brain - console.mistral.ai)", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            OutlinedTextField(
+                value = mistralText,
+                onValueChange = { mistralText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Mistral model (leave blank for ${BrainPrefs.MISTRAL_DEFAULT})", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            OutlinedTextField(
+                value = mistralModel,
+                onValueChange = { mistralModel = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text("Cloudflare Workers AI token (optional backup brain)", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            OutlinedTextField(
+                value = cfTokenText,
+                onValueChange = { cfTokenText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Cloudflare account ID (needed with the token)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            OutlinedTextField(
+                value = cfAccountText,
+                onValueChange = { cfAccountText = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Cloudflare model (blank = built-in Llama default)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            OutlinedTextField(
+                value = cfModel,
+                onValueChange = { cfModel = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text(
                 "Finnhub API key (optional - crypto/forex price backup)",
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
@@ -279,22 +323,23 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Row {
-                Button(onClick = {
+            ButtonGrid(
+                BtnSpec("Save", primary = true) {
                     ApiKeyStore.saveKey(context, Provider.GEMINI, geminiText)
                     ApiKeyStore.saveKey(context, Provider.GROQ, groqText)
                     ApiKeyStore.saveKey(context, Provider.OPENROUTER, openRouterText)
                     ApiKeyStore.saveKey(context, Provider.FINNHUB, finnhubText)
                     ApiKeyStore.saveKey(context, Provider.TAVILY, tavilyText)
+                    ApiKeyStore.saveKey(context, Provider.MISTRAL, mistralText)
+                    ApiKeyStore.saveKey(context, Provider.CLOUDFLARE, cfTokenText)
+                    ApiKeyStore.saveKey(context, Provider.CLOUDFLARE_ACCOUNT, cfAccountText)
+                    BrainPrefs.setMistralModel(context, mistralModel)
+                    BrainPrefs.setCloudflareModel(context, cfModel)
                     saved = true
-                }) {
-                    Text("Save")
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                OutlinedButton(onClick = onBack) {
-                    Text("Back")
-                }
-            }
+                },
+                BtnSpec("Back") { onBack() },
+                perRow = 2
+            )
 
             if (saved) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -317,6 +362,10 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         PanelCard { LocationSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        PanelCard { ProactiveSection() }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -379,8 +428,8 @@ fun BackupSection() {
     )
     Spacer(modifier = Modifier.height(12.dp))
 
-    Row {
-        Button(onClick = {
+    ButtonGrid(
+        BtnSpec("Backup to Google Drive", primary = true) {
             val intent = BackupManager.shareBackupIntent(context)
             // Try Google Drive directly first - falls back to the
             // regular share sheet if Drive isn't installed, so this
@@ -391,18 +440,12 @@ fun BackupSection() {
             } catch (e: Exception) {
                 context.startActivity(Intent.createChooser(intent, "Share VINCE backup"))
             }
-        }) {
-            Text("Backup to Google Drive")
-        }
-    }
-    Spacer(modifier = Modifier.height(8.dp))
-    Row {
-        OutlinedButton(onClick = {
+        },
+        BtnSpec("Restore from Google Drive") {
             restoreLauncher.launch(arrayOf("*/*"))   // v2.6 - Drive/WhatsApp often label the .json as another type, which greyed it out
-        }) {
-            Text("Restore from Google Drive")
-        }
-    }
+        },
+        perRow = 2
+    )
     Spacer(modifier = Modifier.height(4.dp))
     Text(
         text = "The restore picker lets you browse Drive directly, same as any " +
@@ -459,9 +502,7 @@ fun SecuritySection() {
 
     if (pinSet) {
         if (!showRemoveConfirm) {
-            Button(onClick = { showRemoveConfirm = true }) {
-                Text("Remove PIN")
-            }
+            VButton(text = "Remove PIN", onClick = { showRemoveConfirm = true }, modifier = Modifier.fillMaxWidth())
         } else {
             Text(
                 "Enter your current PIN to confirm removal:",
@@ -481,8 +522,8 @@ fun SecuritySection() {
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Row {
-                Button(onClick = {
+            ButtonGrid(
+                BtnSpec("Confirm removal", primary = true) {
                     if (SecurityLock.verifyPin(context, removePinEntry)) {
                         SecurityLock.clearPin(context)
                         pinSet = false
@@ -492,17 +533,13 @@ fun SecuritySection() {
                     } else {
                         message = "That PIN is incorrect - PIN not removed."
                     }
-                }) {
-                    Text("Confirm removal")
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                OutlinedButton(onClick = {
+                },
+                BtnSpec("Cancel") {
                     showRemoveConfirm = false
                     removePinEntry = ""
-                }) {
-                    Text("Cancel")
-                }
-            }
+                },
+                perRow = 2
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -532,18 +569,20 @@ fun SecuritySection() {
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = {
-            if (recoveryQuestion.isBlank() || recoveryAnswer.isBlank()) {
-                message = "Fill in both the question and the answer."
-            } else {
-                SecurityLock.setRecoveryQuestion(context, recoveryQuestion, recoveryAnswer)
-                recoveryQuestion = ""
-                recoveryAnswer = ""
-                message = "Recovery question saved."
-            }
-        }) {
-            Text("Save recovery question")
-        }
+        VButton(
+            text = "Save recovery question", primary = true,
+            onClick = {
+                if (recoveryQuestion.isBlank() || recoveryAnswer.isBlank()) {
+                    message = "Fill in both the question and the answer."
+                } else {
+                    SecurityLock.setRecoveryQuestion(context, recoveryQuestion, recoveryAnswer)
+                    recoveryQuestion = ""
+                    recoveryAnswer = ""
+                    message = "Recovery question saved."
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     } else {
         OutlinedTextField(
             value = newPin,
@@ -569,21 +608,23 @@ fun SecuritySection() {
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = {
-            when {
-                newPin.length < 4 -> message = "PIN needs to be at least 4 digits."
-                newPin != confirmPin -> message = "PINs don't match."
-                else -> {
-                    SecurityLock.setPin(context, newPin)
-                    pinSet = true
-                    newPin = ""
-                    confirmPin = ""
-                    message = "PIN set. Scroll down to also set a recovery question, in case you forget it."
+        VButton(
+            text = "Set PIN", primary = true,
+            onClick = {
+                when {
+                    newPin.length < 4 -> message = "PIN needs to be at least 4 digits."
+                    newPin != confirmPin -> message = "PINs don't match."
+                    else -> {
+                        SecurityLock.setPin(context, newPin)
+                        pinSet = true
+                        newPin = ""
+                        confirmPin = ""
+                        message = "PIN set. Scroll down to also set a recovery question, in case you forget it."
+                    }
                 }
-            }
-        }) {
-            Text("Set PIN")
-        }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 
     message?.let {
@@ -629,16 +670,14 @@ fun SystemChecksSection() {
     )
     Spacer(modifier = Modifier.height(6.dp))
     if (!batteryExempted) {
-        OutlinedButton(onClick = {
+        VButton(text = "Allow VINCE to ignore battery optimization", onClick = {
             try {
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
                 context.startActivity(intent)
             } catch (e: Exception) { }
-        }) {
-            Text("Allow VINCE to ignore battery optimization")
-        }
+        }, modifier = Modifier.fillMaxWidth())
         Spacer(modifier = Modifier.height(10.dp))
     }
     Text(
@@ -650,16 +689,14 @@ fun SystemChecksSection() {
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     )
     Spacer(modifier = Modifier.height(6.dp))
-    OutlinedButton(onClick = {
+    VButton(text = "Open VINCE app settings", onClick = {
         try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:${context.packageName}")
             }
             context.startActivity(intent)
         } catch (e: Exception) { }
-    }) {
-        Text("Open VINCE app settings")
-    }
+    }, modifier = Modifier.fillMaxWidth())
 
     Spacer(modifier = Modifier.height(20.dp))
 
@@ -673,7 +710,7 @@ fun SystemChecksSection() {
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     )
     Spacer(modifier = Modifier.height(6.dp))
-    OutlinedButton(onClick = {
+    VButton(text = "Open Text-to-Speech settings", onClick = {
         try {
             context.startActivity(Intent("com.android.settings.TTS_SETTINGS"))
         } catch (e: Exception) {
@@ -681,8 +718,6 @@ fun SystemChecksSection() {
                 context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             } catch (e2: Exception) { }
         }
-    }) {
-        Text("Open Text-to-Speech settings")
-    }
+    }, modifier = Modifier.fillMaxWidth())
 }
 

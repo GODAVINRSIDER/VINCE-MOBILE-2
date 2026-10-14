@@ -84,6 +84,8 @@ class AlertReceiver : BroadcastReceiver() {
                     openThreadId = BriefingBuilder.JOURNAL_THREAD
                 )
             }
+            // v2.7 - proactive persona check-ins (morning / midday / evening)
+            else -> ProactiveEngine.slotForType(type)?.let { ProactiveEngine.fire(context, it) }
         }
     }
 

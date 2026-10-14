@@ -12,6 +12,24 @@ enum class Provider(val displayName: String, val prefKey: String) {
     FINNHUB("Finnhub", "finnhub_api_key"),
     TAVILY("Tavily", "tavily_api_key"),
     ELEVENLABS("ElevenLabs", "elevenlabs_api_key"),
+    // v2.7 - extra backup brains for chat
+    MISTRAL("Mistral", "mistral_api_key"),
+    CLOUDFLARE("Cloudflare", "cloudflare_api_token"),
+    CLOUDFLARE_ACCOUNT("Cloudflare account ID", "cloudflare_account_id"),
+}
+
+/** Non-secret brain settings: which model each backup provider uses (blank = the built-in default). */
+object BrainPrefs {
+    private const val PREFS = "vince_brain_prefs"
+    const val MISTRAL_DEFAULT = "mistral-small-latest"
+    // tried in order; a retired one just falls through to the next
+    val CLOUDFLARE_DEFAULTS = listOf("@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct")
+
+    private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    fun mistralModel(c: Context): String = prefs(c).getString("mistral_model", "")?.trim().orEmpty()
+    fun cloudflareModel(c: Context): String = prefs(c).getString("cloudflare_model", "")?.trim().orEmpty()
+    fun setMistralModel(c: Context, v: String) { prefs(c).edit().putString("mistral_model", v.trim()).apply() }
+    fun setCloudflareModel(c: Context, v: String) { prefs(c).edit().putString("cloudflare_model", v.trim()).apply() }
 }
 
 /**
@@ -53,5 +71,6 @@ object ApiKeyStore {
      * lookups), not a chat provider, so it's deliberately excluded here -
      * having only a Finnhub key shouldn't claim "chat is ready". */
     fun hasAnyKey(context: Context): Boolean =
-        listOf(Provider.GEMINI, Provider.GROQ, Provider.OPENROUTER).any { hasKey(context, it) }
+        listOf(Provider.GEMINI, Provider.GROQ, Provider.OPENROUTER, Provider.MISTRAL).any { hasKey(context, it) } ||
+            (hasKey(context, Provider.CLOUDFLARE) && hasKey(context, Provider.CLOUDFLARE_ACCOUNT))
 }

@@ -86,7 +86,8 @@ fun AlertsSection() {
     AlertSwitchRow("New York open", "Alert $sessionLead min before 8:00 New York time", ny) { ny = it; toggle(AlertPrefs.K_NY, it) }
     AlertSwitchRow("Asia (Tokyo) open", "Off by default - it opens in the middle of the night here", asia) { asia = it; toggle(AlertPrefs.K_ASIA, it) }
 
-    OutlinedButton(
+    VButton(
+        text = "Session alert lead time: $sessionLead min (tap to change)",
         onClick = {
             val opts = listOf(5, 10, 15, 30)
             val next = opts[((opts.indexOf(sessionLead).takeIf { it >= 0 } ?: 0) + 1) % opts.size]
@@ -94,8 +95,8 @@ fun AlertsSection() {
             AlertPrefs.setInt(context, AlertPrefs.K_SESSION_LEAD, next)
             AlertScheduler.rescheduleAll(context)
         },
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-    ) { Text("Session alert lead time: $sessionLead min (tap to change)", fontSize = 12.sp) }
+        modifier = Modifier.fillMaxWidth()
+    )
 
     Spacer(modifier = Modifier.height(12.dp))
     AlertSwitchRow("High-impact news heads-up", "Alert $newsLead min before big releases (NFP, CPI, FOMC...)", news) {
@@ -104,7 +105,8 @@ fun AlertsSection() {
     AlertSwitchRow("News from every currency", "Default is USD, EUR, GBP and JPY only", allCcy) {
         allCcy = it; toggle(AlertPrefs.K_NEWS_ALL_CCY, it, forceNews = true)
     }
-    OutlinedButton(
+    VButton(
+        text = "News heads-up lead time: $newsLead min (tap to change)",
         onClick = {
             val opts = listOf(5, 15, 30, 60)
             val next = opts[((opts.indexOf(newsLead).takeIf { it >= 0 } ?: 0) + 1) % opts.size]
@@ -112,8 +114,8 @@ fun AlertsSection() {
             AlertPrefs.setInt(context, AlertPrefs.K_NEWS_LEAD, next)
             AlertScheduler.rescheduleAll(context, forceNews = true)
         },
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-    ) { Text("News heads-up lead time: $newsLead min (tap to change)", fontSize = 12.sp) }
+        modifier = Modifier.fillMaxWidth()
+    )
 
     Spacer(modifier = Modifier.height(12.dp))
     AlertSwitchRow("Daily briefing", "Sessions, high-impact news, headlines, your rules and plan", briefing) { briefing = it; toggle(AlertPrefs.K_BRIEFING, it) }
@@ -157,11 +159,15 @@ fun AlertsSection() {
         label = { Text("Today's plan / targets (clears at midnight)") }
     )
     Spacer(modifier = Modifier.height(8.dp))
-    Button(onClick = {
-        TradingPlanStore.setRules(context, rulesText)
-        TradingPlanStore.setPlanToday(context, planText)
-        planSaved = true
-    }) { Text("Save rules and plan") }
+    VButton(
+        text = "Save rules and plan", primary = true,
+        onClick = {
+            TradingPlanStore.setRules(context, rulesText)
+            TradingPlanStore.setPlanToday(context, planText)
+            planSaved = true
+        },
+        modifier = Modifier.fillMaxWidth()
+    )
     if (planSaved) {
         Text("Saved.", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
     }
@@ -178,14 +184,14 @@ fun AlertsSection() {
     )
     if (!exactOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedButton(onClick = {
+        VButton(text = "Allow exact alarms", onClick = {
             try {
                 context.startActivity(
                     Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (e: Exception) { /* settings page unavailable */ }
-        }) { Text("Allow exact alarms") }
+        }, modifier = Modifier.fillMaxWidth())
     }
     val batteryFree = run {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -204,36 +210,35 @@ fun AlertsSection() {
         fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     )
     Spacer(modifier = Modifier.height(6.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = {
+    ButtonGrid(
+        BtnSpec("App settings") {
             try {
                 context.startActivity(
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (e: Exception) { /* nothing to open */ }
-        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("App settings", fontSize = 12.sp) }
-        OutlinedButton(onClick = {
-            BackgroundHelp.openAutostart(context)
-        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Autostart page", fontSize = 12.sp) }
-        OutlinedButton(onClick = {
+        },
+        BtnSpec("Autostart") { BackgroundHelp.openAutostart(context) },
+        BtnSpec("Battery") {
             try {
                 context.startActivity(
                     Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (e: Exception) { /* nothing to open */ }
-        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Battery settings", fontSize = 12.sp) }
-    }
+        },
+        perRow = 3
+    )
 
     Spacer(modifier = Modifier.height(16.dp))
     Text("Test", fontWeight = FontWeight.Bold, fontSize = 14.sp)
     Spacer(modifier = Modifier.height(6.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = {
+    ButtonGrid(
+        BtnSpec("Test alert") {
             Notifs.show(context, Notifs.CH_SESSION, 7999, "VINCE test alert", "If you can see this, alerts can reach you.")
             testNote = "Test alert sent. If nothing appeared, allow notifications for VINCE in App settings."
-        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Test alert", fontSize = 12.sp) }
-        OutlinedButton(onClick = {
+        },
+        BtnSpec("Test briefing") {
             testNote = "Building briefing..."
             scope.launch {
                 val text = BriefingBuilder.buildWithin(context, 9_000, includeHeadlines = true)
@@ -248,8 +253,9 @@ fun AlertsSection() {
                 )
                 testNote = "Briefing sent - tap the notification to open it."
             }
-        }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) { Text("Test briefing", fontSize = 12.sp) }
-    }
+        },
+        perRow = 2
+    )
     Spacer(modifier = Modifier.height(16.dp))
     Text("Recent alerts (due vs arrived)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
     var logTick by remember { mutableStateOf(0) }
@@ -264,10 +270,7 @@ fun AlertsSection() {
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedButton(
-            onClick = { AlertLog.clear(context); logTick++ },
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-        ) { Text("Clear log", fontSize = 12.sp) }
+        VButton(text = "Clear log", onClick = { AlertLog.clear(context); logTick++ }, modifier = Modifier.fillMaxWidth())
     }
     testNote?.let {
         Spacer(modifier = Modifier.height(4.dp))
@@ -298,14 +301,8 @@ private fun TimeStepperRow(label: String, minutes: Int, onChange: (Int) -> Unit)
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("$label: ${AlertPrefs.formatMinutes(minutes)}", modifier = Modifier.weight(1f), fontSize = 13.sp)
-        OutlinedButton(
-            onClick = { onChange((minutes - 30 + 1440) % 1440) },
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-        ) { Text("-30m", fontSize = 12.sp) }
+        VButton(text = "-30m", onClick = { onChange((minutes - 30 + 1440) % 1440) }, modifier = Modifier.width(72.dp))
         Spacer(modifier = Modifier.width(6.dp))
-        OutlinedButton(
-            onClick = { onChange((minutes + 30) % 1440) },
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-        ) { Text("+30m", fontSize = 12.sp) }
+        VButton(text = "+30m", onClick = { onChange((minutes + 30) % 1440) }, modifier = Modifier.width(72.dp))
     }
 }

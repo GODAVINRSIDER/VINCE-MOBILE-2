@@ -52,7 +52,7 @@ object AlertScheduler {
     private const val SWEEP_HOUR = 5
     private const val SWEEP_THROTTLE_MS = 3 * 60 * 60 * 1000L
 
-    private fun pending(context: Context, requestCode: Int, type: String, title: String = "", body: String = "", scheduledAt: Long = 0L): PendingIntent {
+    internal fun pending(context: Context, requestCode: Int, type: String, title: String = "", body: String = "", scheduledAt: Long = 0L): PendingIntent {
         val intent = Intent(context, AlertReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, type)
             putExtra(EXTRA_TITLE, title)
@@ -103,6 +103,7 @@ object AlertScheduler {
         scheduleDaily(app, T_BRIEFING, RC_BRIEFING, AlertPrefs.K_BRIEFING, AlertPrefs.briefingMinutes(app))
         scheduleDaily(app, T_JOURNAL, RC_JOURNAL, AlertPrefs.K_JOURNAL, AlertPrefs.journalMinutes(app))
         scheduleSweepAlarm(app)
+        ProactiveEngine.scheduleAll(app)   // v2.7 - proactive persona check-ins
         ReminderScheduler.rearmAll(app)
         ReminderGuardService.sync(app)
         // The news sweep needs the network, so it runs off the main thread (throttled).
@@ -120,6 +121,7 @@ object AlertScheduler {
             T_BRIEFING -> scheduleDaily(context, type, RC_BRIEFING, AlertPrefs.K_BRIEFING, AlertPrefs.briefingMinutes(context))
             T_JOURNAL -> scheduleDaily(context, type, RC_JOURNAL, AlertPrefs.K_JOURNAL, AlertPrefs.journalMinutes(context))
             T_SWEEP -> scheduleSweepAlarm(context)
+            else -> ProactiveEngine.slotForType(type)?.let { ProactiveEngine.scheduleSlot(context, it) }
         }
     }
 

@@ -1,3 +1,27 @@
+v2.7-phone (versionCode 9) - proactive personas, ElevenLabs enforcement, exact location, backup brains, button cleanup
+
+1. SETTINGS BUTTONS - new UiKit.kt (VButton / ButtonGrid). Every Settings card now uses one button style: same height, equal
+   widths in a row, rounded, label centred. Old buttons had 2dp padding + three-in-a-row with no weights, so labels wrapped
+   and every button came out a different shape. Voice, Location, Alerts, Phone control, Backup, Security, System checks.
+2. ELEVENLABS - tried harder before the phone voice takes over: up to 3 attempts per sentence (last one on a second
+   ElevenLabs model), 8 s cooldown instead of 30 s after one blip, short pieces joined into one request, previous_text
+   sent so tone carries between sentences, 8 s connect timeout, stale error cleared on success. Settings > Voice has a new
+   "Check ElevenLabs connection" button that says exactly what ElevenLabs answered (bad key / voice ID / quota / plan).
+   NOTE: paste the SAME voice IDs VINCE 3.0 uses, or you hear stock voices.
+3. LOCATION - "where am I" now returns street/area/city lines, exact coordinates, accuracy and a Maps link (fresh GPS fix).
+   "where have I been" / "list my places" returns a NUMBERED list of places from the last 48 h (newest first, time range +
+   coordinates). "clear my places" wipes it. Settings > Location: "Show my places" list, optional "Exact places (GPS)".
+4. BACKUP BRAINS - Mistral and Cloudflare Workers AI added to the provider race (Settings keys + optional model fields).
+5. PROACTIVE PERSONAS - ProactiveEngine: Morning (VINCE), Midday (DAVINA), Evening (CLARA) check-ins with one opinion/idea
+   and a question, not trading-only. Master + per-slot switches, times, quiet hours, max 3/day, no web search, anti-repeat,
+   silent if all AI fails. Opens in a "Check-ins" chat. Personas rewritten as JARVIS/FRIDAY-style lanes with a proactive
+   style rule in every reply. "what can you do" shows a menu by lane.
+
+NOT compile-tested here (no Android SDK) - syntax-checked with kotlinc only. Build in Android Studio / your usual pipeline.
+Also: delete the stray nested folder VINCE_MOBILE_2/ inside the project (stale duplicate from an earlier zip).
+
+----
+
 VINCE MOBILE 2.6.1 (versionCode 8 / versionName 2.6.1-phone)  -  includes 2.5 and 2.6
 ==========================================================================================
 Extract into your project folder and overwrite (zip root is app/ - no wrapper folder).

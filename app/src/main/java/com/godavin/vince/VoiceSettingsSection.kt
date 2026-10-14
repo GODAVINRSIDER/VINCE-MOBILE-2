@@ -42,7 +42,9 @@ fun VoiceSettingsSection() {
         key.isBlank() -> "No ElevenLabs key saved - using the phone's voice."
         !enabled -> "ElevenLabs is switched off - using the phone's voice."
         tick >= 0 && ProviderHealth.coolingDown("ElevenLabs") ->
-            "ElevenLabs had a problem (key or quota?) - using the phone's voice for a while."
+            "ElevenLabs problem: ${ElevenVoice.lastError.ifBlank { "key or quota?" }} - using the phone's voice for a while."
+        tick >= 0 && ElevenVoice.lastError.isNotBlank() ->
+            "ElevenLabs is on, but the last request failed: ${ElevenVoice.lastError}. That voice uses the phone voice until you fix its ID."
         else -> "ElevenLabs is the main voice. The phone's voice takes over if it fails."
     }
 
@@ -85,6 +87,7 @@ fun VoiceSettingsSection() {
             Button(onClick = {
                 ApiKeyStore.saveKey(context, Provider.ELEVENLABS, key.trim())
                 ElevenVoice.reloadKey(context)
+                ElevenVoice.clearProblems()
                 ElevenVoice.setEnabled(context, enabled)
                 ElevenVoice.setVoiceId(context, Persona.VINCE, vince)
                 ElevenVoice.setVoiceId(context, Persona.CLARA, clara)
@@ -93,13 +96,13 @@ fun VoiceSettingsSection() {
                 tick++
             }, contentPadding = pad) { Text("Save voice settings", fontSize = 12.sp) }
             OutlinedButton(onClick = {
-                VoiceOutput.speak("Hi, this is VINCE. How do I sound?", Persona.VINCE)
+                VoiceOutput.speak("Hi, this is VINCE. How do I sound?", Persona.VINCE); tick++
             }, contentPadding = pad) { Text("Test", fontSize = 12.sp) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
             val pad = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-            OutlinedButton(onClick = { VoiceOutput.speak("Hi, this is Clara.", Persona.CLARA) }, contentPadding = pad) { Text("Test CLARA", fontSize = 12.sp) }
-            OutlinedButton(onClick = { VoiceOutput.speak("Hi, this is Davina.", Persona.DAVINA) }, contentPadding = pad) { Text("Test DAVINA", fontSize = 12.sp) }
+            OutlinedButton(onClick = { VoiceOutput.speak("Hi, this is Clara.", Persona.CLARA); tick++ }, contentPadding = pad) { Text("Test CLARA", fontSize = 12.sp) }
+            OutlinedButton(onClick = { VoiceOutput.speak("Hi, this is Davina.", Persona.DAVINA); tick++ }, contentPadding = pad) { Text("Test DAVINA", fontSize = 12.sp) }
         }
         if (saved) Text("Saved. Tap Test to hear it.", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(top = 6.dp))

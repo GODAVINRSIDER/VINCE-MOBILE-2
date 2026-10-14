@@ -70,14 +70,17 @@ object VoiceOutput {
         }
     }
 
-    private fun elevenReady(): Boolean {
+    private fun elevenReady(persona: Persona): Boolean {
         val c = appContext ?: return false
-        return ElevenVoice.available(c)
+        return ElevenVoice.available(c, persona)
     }
+
+    /** For SentenceSpeaker: will this persona's reply be spoken by ElevenLabs? */
+    fun elevenWillSpeak(persona: Persona): Boolean = elevenReady(persona)
 
     fun speak(text: String, persona: Persona = Persona.VINCE) {
         if (text.isBlank()) return
-        if (elevenReady()) {
+        if (elevenReady(persona)) {
             tts?.stop()
             ElevenVoice.speak(stripMarkdownForSpeech(text).take(3900), persona)
             return
@@ -91,7 +94,7 @@ object VoiceOutput {
      * on the first finished sentence while the rest is still being written. */
     fun speakChunk(text: String, persona: Persona, first: Boolean) {
         if (text.isBlank()) return
-        if (elevenReady()) {
+        if (elevenReady(persona)) {
             if (first) tts?.stop()
             ElevenVoice.speakChunk(stripMarkdownForSpeech(text).take(3900), persona, first)
             return
@@ -136,7 +139,7 @@ object VoiceOutput {
      * timeout passes. Used by the continuous voice session. */
     suspend fun speakAwait(text: String, persona: Persona = Persona.VINCE) {
         if (text.isBlank()) return
-        if (elevenReady()) {
+        if (elevenReady(persona)) {
             tts?.stop()
             ElevenVoice.speakAwait(stripMarkdownForSpeech(text).take(3900), persona)
             return
@@ -213,14 +216,26 @@ object VoiceOutput {
  */
 class SentenceSpeaker(private val persona: Persona) {
     private val buf = StringBuilder()
+    private val full = StringBuilder()
     private var spokeAny = false
+    private var chunked: Boolean? = null
 
     fun feed(delta: String) {
+        if (chunked == null) chunked = VoiceOutput.elevenWillSpeak(persona)
+        full.append(delta)
+        // The phone's own voice leaves a long gap between queued sentences, so it gets the
+        // whole reply as ONE utterance when the reply is finished (as before v2.5).
+        // Sentence-by-sentence is only for ElevenLabs, which has no such gap.
+        if (chunked != true) return
         buf.append(delta)
         flush(final = false)
     }
 
     fun finish() {
+        if (chunked != true) {
+            if (full.isNotBlank()) VoiceOutput.speak(full.toString(), persona)
+            return
+        }
         flush(final = true)
     }
 

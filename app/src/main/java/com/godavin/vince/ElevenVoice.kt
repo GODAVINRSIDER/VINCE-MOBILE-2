@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -74,6 +75,7 @@ object ElevenVoice {
 
     fun setVoiceId(context: Context, persona: Persona, id: String) {
         prefs(context).edit().putString("voice_${persona.name}", id.trim()).apply()
+        badVoices.remove(id.trim())
     }
 
     fun defaultVoiceId(persona: Persona): String = DEFAULT_VOICE_IDS[persona] ?: ""
@@ -93,7 +95,31 @@ object ElevenVoice {
         scope.launch { playerLoop() }
     }
 
-    /** True when ElevenLabs should be used for the next sentence. */
+    /** Why the last request failed, e.g. "CLARA: HTTP 402 paid_plan_required". Shown in Settings. */
+    @Volatile var lastError: String = ""
+
+    // A voice ID that ElevenLabs rejected (wrong ID, or a library voice your plan can't use
+    // through the API) is skipped on its own. It must NOT switch off the other voices.
+    private val badVoices = ConcurrentHashMap<String, Long>()
+
+    private fun voiceBad(id: String): Boolean {
+        val until = badVoices[id] ?: return false
+        return System.currentTimeMillis() < until
+    }
+
+    /** Forget past failures (after saving a new key or new voice IDs). */
+    fun clearProblems() {
+        badVoices.clear()
+        lastError = ""
+        ProviderHealth.markOk(NAME)
+    }
+
+    /** True when ElevenLabs should be used for THIS persona's next sentence. */
+    fun available(context: Context, persona: Persona): Boolean =
+        app != null && cachedKey.isNotBlank() && isEnabled(context) &&
+            !ProviderHealth.coolingDown(NAME) && !voiceBad(voiceId(context, persona))
+
+    /** General "is it set up" check for the Settings status line. */
     fun available(context: Context): Boolean =
         app != null && cachedKey.isNotBlank() && isEnabled(context) && !ProviderHealth.coolingDown(NAME)
 
@@ -212,19 +238,39 @@ object ElevenVoice {
                     pcm.trySend(Done(r.epoch, r.signal))
                     continue
                 }
-                fetch(r.epoch, r.text, r.persona)
+                if (fetch(r.epoch, r.text, r.persona)) {
+                    // Nothing could be played for this sentence. Hand the phone voice the
+                    // WHOLE rest of the reply as ONE utterance - speaking it sentence by
+                    // sentence left a long gap after every full stop.
+                    var combined: String? = r.text
+                    var merged = 1
+                    while (true) {
+                        val next = reqs.tryReceive().getOrNull() ?: break
+                        if (next.epoch != epoch) { next.signal?.complete(Unit); continue }
+                        if (next.text == null) {
+                            pcm.trySend(Fail(r.epoch, combined!!, r.persona))
+                            pcm.trySend(Done(next.epoch, next.signal))
+                            combined = null
+                            break
+                        }
+                        combined += " " + next.text
+                        merged++
+                    }
+                    if (combined != null) pcm.trySend(Fail(r.epoch, combined, r.persona))
+                    if (merged > 1) active.addAndGet(-(merged - 1))
+                }
             } catch (e: Exception) {
                 r.signal?.complete(Unit)
             }
         }
     }
 
-    private suspend fun fetch(e: Int, text: String, persona: Persona) {
+    /** @return true if nothing could be played for this sentence (caller falls back). */
+    private suspend fun fetch(e: Int, text: String, persona: Persona): Boolean {
         val ctx = app
-        if (ctx == null || cachedKey.isBlank() || ProviderHealth.coolingDown(NAME)) {
-            pcm.trySend(Fail(e, text, persona))
-            return
-        }
+        if (ctx == null || cachedKey.isBlank() || ProviderHealth.coolingDown(NAME)) return true
+        val vid = voiceId(ctx, persona)
+        if (voiceBad(vid)) return true
         var sentAny = false
         try {
             val body = JSONObject()
@@ -233,7 +279,7 @@ object ElevenVoice {
                 .put("voice_settings", JSONObject().put("stability", 0.5).put("similarity_boost", 0.75))
                 .toString()
             val request = Request.Builder()
-                .url("https://api.elevenlabs.io/v1/text-to-speech/${voiceId(ctx, persona)}/stream?output_format=pcm_24000")
+                .url("https://api.elevenlabs.io/v1/text-to-speech/$vid/stream?output_format=pcm_24000")
                 .addHeader("xi-api-key", cachedKey)
                 .addHeader("Accept", "application/octet-stream")
                 .post(body.toRequestBody("application/json".toMediaType()))
@@ -241,9 +287,22 @@ object ElevenVoice {
             val ok = HttpStream.run(client, request) { resp ->
                 if (!resp.isSuccessful) {
                     val err = resp.body?.string().orEmpty()
-                    val fatal = resp.code == 401 || resp.code == 402 || resp.code == 403 ||
-                        err.contains("quota", ignoreCase = true)
-                    ProviderHealth.markFailed(NAME, if (fatal) 30 * 60_000L else 60_000L)
+                    val detail = try {
+                        val d = JSONObject(err).opt("detail")
+                        if (d is JSONObject) d.optString("status") + " " + d.optString("message") else d?.toString().orEmpty()
+                    } catch (x: Exception) { err.take(120) }
+                    lastError = "${persona.name}: HTTP ${resp.code} ${detail.trim().take(140)}"
+                    val keyOrQuota = resp.code == 401 || err.contains("quota_exceeded", ignoreCase = true)
+                    when {
+                        // wrong key or no credit left: affects every voice
+                        keyOrQuota -> ProviderHealth.markFailed(NAME, 30 * 60_000L)
+                        // this voice ID is the problem (not found / needs a paid plan / bad request)
+                        resp.code == 400 || resp.code == 402 || resp.code == 403 ||
+                            resp.code == 404 || resp.code == 422 ->
+                            badVoices[vid] = System.currentTimeMillis() + 30 * 60_000L
+                        // busy / temporary
+                        else -> ProviderHealth.markFailed(NAME, 30_000L)
+                    }
                     return@run false
                 }
                 val src = resp.body!!.byteStream()
@@ -269,11 +328,16 @@ object ElevenVoice {
                 }
                 true
             }
-            if (!ok && !sentAny) pcm.trySend(Fail(e, text, persona)) else pcm.trySend(End(e))
+            if (!ok && !sentAny) return true
+            pcm.trySend(End(e))
+            return false
         } catch (ex: Exception) {
-            if (e != epoch) return
-            ProviderHealth.markFailed(NAME)
-            if (!sentAny) pcm.trySend(Fail(e, text, persona)) else pcm.trySend(End(e))
+            if (e != epoch) return false
+            lastError = "${persona.name}: ${ex.message ?: ex.javaClass.simpleName}".take(160)
+            ProviderHealth.markFailed(NAME, 30_000L)
+            if (!sentAny) return true
+            pcm.trySend(End(e))
+            return false
         }
     }
 

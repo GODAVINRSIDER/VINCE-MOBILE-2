@@ -1,7 +1,20 @@
-VINCE MOBILE 2.6 (versionCode 7 / versionName 2.6-phone)  -  includes everything from 2.5
+VINCE MOBILE 2.6.1 (versionCode 8 / versionName 2.6.1-phone)  -  includes 2.5 and 2.6
 ==========================================================================================
 Extract into your project folder and overwrite (zip root is app/ - no wrapper folder).
 app/debug.keystore is untouched - do not replace it.
+
+FIXES IN 2.6.1
+A. ONE BAD VOICE NO LONGER KILLS THE REST. A rejected voice ID (wrong ID, or a library voice
+   your plan can't use through the API) used to switch ElevenLabs off for ALL voices for 30
+   minutes - that was the "Vince on and off". Now only that voice falls back; a wrong key or an
+   empty quota still affects all of them.
+B. THE REAL REASON IS SHOWN. Settings > Voice now prints the last ElevenLabs error
+   (e.g. "CLARA: HTTP 402 paid_plan_required"). Save voice settings clears old problems.
+C. NO MORE PAUSE AFTER EVERY FULL STOP ON THE PHONE VOICE. 2.5/2.6 spoke the phone voice one
+   sentence at a time, and Android leaves a gap between queued sentences. The phone voice now
+   speaks the whole reply as one utterance again (like 2.4). Sentence-by-sentence is only used
+   for ElevenLabs. If ElevenLabs fails mid-reply, the rest is handed to the phone voice as ONE
+   piece, not sentence by sentence.
 
 NEW IN 2.6
 1. GUIDED PHONE-CONTROL SETUP (Settings > Phone control). One button walks you through

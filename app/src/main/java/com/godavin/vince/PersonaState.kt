@@ -64,6 +64,13 @@ enum class Persona(
         DAVINA -> DavinaPurple
     }
 
+    /** v2.8 - the light "core" tone of each persona, same values as VINCE 3.0's HUD (used for the glowing name). */
+    fun core(): Color = when (this) {
+        VINCE -> Color(0xFFA5F3FC)
+        CLARA -> Color(0xFFFBCFE8)
+        DAVINA -> Color(0xFFE9D5FF)
+    }
+
     companion object {
         fun fromName(name: String): Persona = values().find { it.name == name } ?: VINCE
     }
@@ -84,10 +91,15 @@ object PersonaState {
         return Persona.fromName(name)
     }
 
+    // v2.8 - live copy the theme watches, so switching persona recolours the whole app (like VINCE 3.0's HUD),
+    // not just the screen that made the switch. null = not read from storage yet.
+    val live = androidx.compose.runtime.mutableStateOf<Persona?>(null)
+
     fun setActive(context: Context, persona: Persona) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_ACTIVE, persona.name)
             .apply()
+        live.value = persona
     }
 }

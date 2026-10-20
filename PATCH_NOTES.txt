@@ -1,3 +1,29 @@
+v2.8-phone (versionCode 10) - new logo, HUD home ring, persona-coloured UI, chat search   [CUMULATIVE: includes everything from v2.7]
+
+APPLY: unzip this over your project (zip root is app/). Then DELETE these two old files (a zip can't delete them):
+  app/src/main/res/drawable/ic_launcher_foreground.xml
+  app/src/main/res/drawable/ic_vince_triangle.xml
+(the new ic_launcher_foreground is a PNG in drawable-nodpi; keeping the old xml too would be a duplicate-resource build error.)
+Also delete the stray nested VINCE_MOBILE_2/ folder if it is still in your project.
+
+1. LOGO - the neon V from your image: launcher icon (adaptive, dark navy background with a faint cyan/pink glow, plus a
+   monochrome layer for Android 13 themed icons), the floating bubble, the call screen and the home tiles.
+2. HOME RING - the star/brain/heart hub is gone. Same ring as VINCE 3.0's HUD (new PersonaRingHud.kt): three wedges (VINCE
+   top cyan, CLARA bottom-right pink, DAVINA bottom-left purple), rotating dashed outer rings, trace lines with blinking nodes,
+   the persona name glowing in the middle with STANDBY / LISTENING / SPEAKING under it, and the equaliser bars. Tap the MIDDLE
+   to switch to the next persona (colour follows), or tap a wedge to pick that persona.
+3. PERSONA COLOUR everywhere - the app accent now follows the active persona (cyan / pink / purple), and the chat shortcut chips
+   (Check the weather, Search the web, ...) wear it too. To revert the app-wide part, in ui/theme/Theme.kt use VinceDarkColors
+   without .copy(primary = accent).
+4. CHAT SEARCH - Chats screen: a search box directly above "+ New chat". Type a word or sentence (all words must match, any
+   order); matching messages and chat titles appear newest first with the words highlighted. Tap one: the chat opens scrolled to
+   that exact message, which flashes for ~3.5 s.
+
+NOT compile-tested here (no Android SDK) - syntax-checked with kotlinc only. First look at: the ring on Home, tapping its centre,
+a search for a word you know is in an old chat.
+
+----
+
 v2.7-phone (versionCode 9) - proactive personas, ElevenLabs enforcement, exact location, backup brains, button cleanup
 
 1. SETTINGS BUTTONS - new UiKit.kt (VButton / ButtonGrid). Every Settings card now uses one button style: same height, equal

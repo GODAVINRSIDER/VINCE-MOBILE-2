@@ -154,7 +154,7 @@ class OverlayService : Service() {
         // triangle logo centered inside. This is the app's own mark, not
         // persona-tinted - only the halo reflects the active persona.
         val logo = ImageView(this).apply {
-            setImageDrawable(ContextCompat.getDrawable(this@OverlayService, R.drawable.ic_launcher_foreground))
+            setImageDrawable(ContextCompat.getDrawable(this@OverlayService, R.drawable.vince_logo))
         }
         val bubble = FrameLayout(this).apply {
             background = GradientDrawable().apply {

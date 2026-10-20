@@ -69,10 +69,13 @@ private const val DEFAULT_VISION_PROMPT = "Look at this image and describe what 
     "onto something that isn't one."
 
 @Composable
-fun ChatScreen(threadId: String, onBack: () -> Unit) {
+fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    // v2.8 - chat search: open scrolled to a specific message and flash it
+    var highlightId by remember { mutableStateOf<String?>(null) }
+    var jumpPending by remember(threadId, focusMessageId) { mutableStateOf(focusMessageId != null) }
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
@@ -449,9 +452,24 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
     }
 
     androidx.compose.runtime.LaunchedEffect(messages.size) {
+        if (jumpPending) return@LaunchedEffect      // v2.8 - opened from a search hit: stay on that message
         if (messages.isNotEmpty()) {
             try { listState.animateScrollToItem(messages.size - 1) } catch (e: Exception) { }
         }
+    }
+
+    // v2.8 - jump to the message a search result pointed at, then flash it for a few seconds
+    androidx.compose.runtime.LaunchedEffect(focusMessageId, threadId) {
+        val target = focusMessageId ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(120)                // let the list lay out first
+        val idx = messages.indexOfFirst { it.id == target }
+        if (idx >= 0) {
+            try { listState.scrollToItem(idx) } catch (e: Exception) { }
+            highlightId = target
+        }
+        jumpPending = false
+        kotlinx.coroutines.delay(3500)
+        highlightId = null
     }
 
     // Leaving the chat ends the session so the mic is never left open behind another screen.
@@ -728,7 +746,17 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                                     }
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(Color(0xFF0D0D0F))
-                                    .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                                    .background(
+                                        androidx.compose.animation.animateColorAsState(
+                                            if (highlightId == msg.id) activePersona.color().copy(alpha = 0.26f) else Color.Transparent,
+                                            animationSpec = tween(500), label = "hit"
+                                        ).value
+                                    )
+                                    .border(
+                                        if (highlightId == msg.id) 2.dp else 1.dp,
+                                        if (highlightId == msg.id) activePersona.color() else color.copy(alpha = 0.25f),
+                                        RoundedCornerShape(14.dp)
+                                    )
                                     .padding(12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -890,10 +918,10 @@ fun ChatScreen(threadId: String, onBack: () -> Unit) {
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SuggestionChip("Check the weather") { send(overrideText = "What's the weather like right now?") }
-            SuggestionChip("Search the web") { input = "Search the web for " }
-            SuggestionChip("Open an app") { input = "Open " }
-            SuggestionChip("Help with something") { send(overrideText = "What can you help me with?") }
+            SuggestionChip("Check the weather", activePersona.color()) { send(overrideText = "What's the weather like right now?") }
+            SuggestionChip("Search the web", activePersona.color()) { input = "Search the web for " }
+            SuggestionChip("Open an app", activePersona.color()) { input = "Open " }
+            SuggestionChip("Help with something", activePersona.color()) { send(overrideText = "What can you help me with?") }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -1050,16 +1078,17 @@ private fun personaIconRes(persona: Persona): Int = when (persona) {
 }
 
 @Composable
-private fun SuggestionChip(label: String, onClick: () -> Unit) {
+private fun SuggestionChip(label: String, color: Color, onClick: () -> Unit) {
+    // v2.8 - the chip wears the active persona's colour (cyan VINCE, pink CLARA, purple DAVINA), not always cyan
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+            .border(1.dp, color.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
+            .background(color.copy(alpha = 0.10f))
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+        Text(label, fontSize = 12.sp, color = color)
     }
 }
 

@@ -4,6 +4,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import com.godavin.vince.PersonaState
 import androidx.compose.ui.graphics.Color
 
 // Matches the existing VINCE HUD palette: teal (Vince), pink (Clara), purple (Davina)
@@ -21,8 +23,11 @@ private val VinceDarkColors = darkColorScheme(
 
 @Composable
 fun VinceTheme(content: @Composable () -> Unit) {
+    // v2.8 - the accent colour follows the active persona (cyan VINCE, pink CLARA, purple DAVINA), like VINCE 3.0's HUD.
+    val context = LocalContext.current
+    val accent = (PersonaState.live.value ?: PersonaState.getActive(context)).color()
     MaterialTheme(
-        colorScheme = VinceDarkColors,
+        colorScheme = VinceDarkColors.copy(primary = accent),
         content = content
     )
 }

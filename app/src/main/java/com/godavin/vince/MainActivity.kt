@@ -127,7 +127,8 @@ private sealed class Screen {
     object ChatList : Screen()
     object ActivityFull : Screen()
     object MemoryFull : Screen()
-    data class Chat(val threadId: String) : Screen()
+    // v2.8 - focusMessageId = open the chat scrolled to (and flashing) that message (chat search)
+    data class Chat(val threadId: String, val focusMessageId: String? = null) : Screen()
     data class InCall(val mode: CallLaunchMode) : Screen()
 }
 
@@ -169,10 +170,10 @@ fun RootScreen(startThreadId: String? = null) {
     when (val s = screen) {
         is Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Home })
         is Screen.ChatList -> ChatListScreen(
-            onOpenThread = { id -> screen = Screen.Chat(id) },
+            onOpenThread = { id, messageId -> screen = Screen.Chat(id, messageId) },
             onBack = { screen = Screen.Home }
         )
-        is Screen.Chat -> ChatScreen(threadId = s.threadId, onBack = { screen = Screen.ChatList })
+        is Screen.Chat -> ChatScreen(threadId = s.threadId, focusMessageId = s.focusMessageId, onBack = { screen = Screen.ChatList })
         is Screen.ActivityFull -> ActivityLogFullScreen(onBack = { screen = Screen.Home })
         is Screen.MemoryFull -> MemoryFullScreen(onBack = { screen = Screen.Home })
         is Screen.InCall -> CallScreen(mode = s.mode, onBack = { screen = Screen.Home })

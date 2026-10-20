@@ -378,7 +378,7 @@ private fun CallRing(persona: Persona, active: Boolean) {
         contentAlignment = Alignment.Center
     ) {
         androidx.compose.foundation.Image(
-            painter = painterResource(id = R.drawable.ic_vince_triangle),
+            painter = painterResource(id = R.drawable.vince_logo),
             contentDescription = null,
             modifier = Modifier
                 .size(72.dp)

@@ -258,15 +258,28 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Wedge ring - tap a third of the ring to switch persona
+        // HUD ring - tap the middle to switch persona, or tap a wedge to pick one
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
-            PersonaWedgeRing(
+            // v2.8 - VINCE 3.0's HUD ring: live rotating rings, persona name in the middle, tap it to switch
+            var speakingNow by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    speakingNow = try { VoiceOutput.isSpeaking } catch (e: Exception) { false }
+                    delay(400)
+                }
+            }
+            PersonaRingHud(
                 active = activePersona,
+                status = when {
+                    isListening -> "LISTENING"
+                    speakingNow -> "SPEAKING"
+                    else -> "STANDBY"
+                },
                 onPersonaTapped = { picked ->
                     activePersona = picked
                     PersonaState.setActive(context, picked)
@@ -535,7 +548,7 @@ private fun CallQuickActionTile(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Image(
-            painter = painterResource(id = R.drawable.ic_vince_triangle),
+            painter = painterResource(id = R.drawable.vince_logo),
             contentDescription = null,
             modifier = Modifier.size(20.dp)
         )
@@ -575,230 +588,3 @@ private fun QuickActionTile(label: String, modifier: Modifier = Modifier, onClic
  * Hit-testing is just each satellite's own Compose clickable bounds, not
  * manual angle math, so it stays accurate through every animation frame.
  */
-@Composable
-private fun PersonaWedgeRing(active: Persona, onPersonaTapped: (Persona) -> Unit) {
-    val diameterDp = 220.dp
-    val radiusDp = 82.dp
-    val satelliteDp = 58.dp
-    val centerDp = 66.dp
-
-    fun baseAngle(p: Persona): Float = when (p) {
-        Persona.VINCE -> -90f
-        Persona.CLARA -> 150f
-        Persona.DAVINA -> 30f
-    }
-
-    fun targetRotation(p: Persona): Float {
-        var r = -90f - baseAngle(p)
-        while (r < 0f) r += 360f
-        while (r >= 360f) r -= 360f
-        return r
-    }
-
-    val rotation = remember { Animatable(targetRotation(active)) }
-    LaunchedEffect(active) {
-        rotation.animateTo(targetRotation(active), animationSpec = tween(700, easing = FastOutSlowInEasing))
-    }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulse by infiniteTransition.animateFloat(
-        initialValue = 0.88f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulse_scale"
-    )
-
-    fun cycleNext() {
-        val next = when (active) {
-            Persona.VINCE -> Persona.CLARA
-            Persona.CLARA -> Persona.DAVINA
-            Persona.DAVINA -> Persona.VINCE
-        }
-        onPersonaTapped(next)
-    }
-
-    fun iconFor(p: Persona): Int = when (p) {
-        Persona.VINCE -> R.drawable.ic_persona_vince
-        Persona.CLARA -> R.drawable.ic_persona_clara
-        Persona.DAVINA -> R.drawable.ic_persona_davina
-    }
-
-    val density = LocalDensity.current
-    val radiusPx = with(density) { radiusDp.toPx() }
-    val personas = listOf(Persona.VINCE, Persona.CLARA, Persona.DAVINA)
-
-    // Lively motion #2 - a small bright "energy pulse" travels along each
-    // connecting line, hub-to-satellite, looping continuously. Combined
-    // with the curved (not straight) connectors and the radial-gradient
-    // glow on every circle below, this is the "lively, more dimensional"
-    // pass on top of the orbit rotation - real depth cues (glow + colored
-    // shadow + motion) rather than a flat static ring, without needing an
-    // actual 3D engine.
-    val pulseTransition = rememberInfiniteTransition(label = "energy_pulse")
-    val pulseT by pulseTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
-        label = "energy_pulse_t"
-    )
-
-    Box(
-        modifier = Modifier.size(diameterDp),
-        contentAlignment = Alignment.Center
-    ) {
-        // Connecting lines - drawn first, so satellites/hub sit on top.
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val centerOffset = Offset(this.size.width / 2f, this.size.height / 2f)
-            personas.forEach { p ->
-                val isActive = p == active
-                val angleRad = Math.toRadians((baseAngle(p) + rotation.value).toDouble())
-                val end = Offset(
-                    centerOffset.x + (radiusPx * kotlin.math.cos(angleRad)).toFloat(),
-                    centerOffset.y + (radiusPx * kotlin.math.sin(angleRad)).toFloat()
-                )
-                // Curve the connector outward slightly (perpendicular to
-                // the hub-satellite line) instead of a straight line -
-                // gives the ring real dimensional bow instead of flat spokes.
-                val mid = Offset((centerOffset.x + end.x) / 2f, (centerOffset.y + end.y) / 2f)
-                val perpAngle = angleRad + Math.PI / 2
-                val bow = radiusPx * 0.12f
-                val control = Offset(
-                    mid.x + (bow * kotlin.math.cos(perpAngle)).toFloat(),
-                    mid.y + (bow * kotlin.math.sin(perpAngle)).toFloat()
-                )
-
-                val path = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(centerOffset.x, centerOffset.y)
-                    quadraticBezierTo(control.x, control.y, end.x, end.y)
-                }
-
-                drawPath(
-                    path = path,
-                    brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = if (isActive) 0.5f else 0.15f),
-                            p.color().copy(alpha = if (isActive) 0.9f else 0.3f)
-                        ),
-                        start = centerOffset,
-                        end = end
-                    ),
-                    style = Stroke(width = if (isActive) 3.dp.toPx() else 1.5.dp.toPx())
-                )
-
-                // Traveling energy pulse along the curve (quadratic Bezier
-                // point at parameter t), brighter on the active connector.
-                val t = pulseT
-                val oneMinusT = 1 - t
-                val pulseX = oneMinusT * oneMinusT * centerOffset.x + 2 * oneMinusT * t * control.x + t * t * end.x
-                val pulseY = oneMinusT * oneMinusT * centerOffset.y + 2 * oneMinusT * t * control.y + t * t * end.y
-                drawCircle(
-                    color = p.color().copy(alpha = if (isActive) 0.9f else 0.35f),
-                    radius = if (isActive) 4.dp.toPx() else 2.5.dp.toPx(),
-                    center = Offset(pulseX, pulseY)
-                )
-            }
-        }
-
-        // Satellites - each one's own clickable, so tap targeting stays
-        // correct through the whole orbit animation automatically.
-        personas.forEach { p ->
-            val isActive = p == active
-            val scale = if (isActive) pulse else 0.85f
-            val satellitePx = with(density) { (satelliteDp * scale).toPx() }
-            Box(
-                modifier = Modifier
-                    .offset {
-                        val angleRad = Math.toRadians((baseAngle(p) + rotation.value).toDouble())
-                        androidx.compose.ui.unit.IntOffset(
-                            (radiusPx * kotlin.math.cos(angleRad)).toInt(),
-                            (radiusPx * kotlin.math.sin(angleRad)).toInt()
-                        )
-                    }
-                    .size(satelliteDp * scale)
-                    .shadow(
-                        elevation = if (isActive) 14.dp else 4.dp,
-                        shape = CircleShape,
-                        ambientColor = p.color(),
-                        spotColor = p.color()
-                    )
-                    .clip(CircleShape)
-                    .background(Color(0xFF0D0D0F))
-                    .background(
-                        androidx.compose.ui.graphics.Brush.radialGradient(
-                            colors = listOf(
-                                p.color().copy(alpha = if (isActive) 0.45f else 0.16f),
-                                p.color().copy(alpha = 0.02f)
-                            )
-                        )
-                    )
-                    // Off-center highlight (light source from the upper
-                    // left) - a real, if simple, bevel/sphere cue that a
-                    // flat centered gradient can't give.
-                    .background(
-                        androidx.compose.ui.graphics.Brush.radialGradient(
-                            colors = listOf(Color.White.copy(alpha = if (isActive) 0.28f else 0.1f), Color.Transparent),
-                            center = Offset(satellitePx * 0.32f, satellitePx * 0.28f),
-                            radius = satellitePx * 0.5f
-                        )
-                    )
-                    .border(
-                        width = 1.dp,
-                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                            listOf(Color.White.copy(alpha = if (isActive) 0.55f else 0.2f), p.color().copy(alpha = 0.4f))
-                        ),
-                        shape = CircleShape
-                    )
-                    .clickable { onPersonaTapped(p) },
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = iconFor(p)),
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(p.color().copy(alpha = if (isActive) 1f else 0.55f)),
-                    modifier = Modifier.size(satelliteDp * scale * 0.5f)
-                )
-            }
-        }
-
-        // Center hub - tap to cycle to the next persona.
-        val centerPx = with(density) { centerDp.toPx() }
-        Box(
-            modifier = Modifier
-                .size(centerDp)
-                .shadow(elevation = 10.dp, shape = CircleShape, ambientColor = Color(0xFF4CE1FF), spotColor = Color(0xFFFF4FD8))
-                .clip(CircleShape)
-                .background(Color(0xFF0D0D0F))
-                .background(
-                    androidx.compose.ui.graphics.Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF4CE1FF).copy(alpha = 0.25f),
-                            Color(0xFF8B5CF6).copy(alpha = 0.08f),
-                            Color.Transparent
-                        )
-                    )
-                )
-                .background(
-                    androidx.compose.ui.graphics.Brush.radialGradient(
-                        colors = listOf(Color.White.copy(alpha = 0.3f), Color.Transparent),
-                        center = Offset(centerPx * 0.32f, centerPx * 0.28f),
-                        radius = centerPx * 0.5f
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                        listOf(Color.White.copy(alpha = 0.5f), Color(0xFF8B5CF6).copy(alpha = 0.5f))
-                    ),
-                    shape = CircleShape
-                )
-                .clickable { cycleNext() },
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_vince_triangle),
-                contentDescription = null,
-                modifier = Modifier.size(centerDp * 0.55f)
-            )
-        }
-    }
-}

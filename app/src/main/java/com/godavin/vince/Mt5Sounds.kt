@@ -278,28 +278,50 @@ object Mt5Sounds {
     private val RX_OK = Regex("\\bdone\\b|order placed|request executed|\\bexecuted\\b|\\bfilled\\b|position opened|placed")
     private val RX_FAIL = Regex("reject|invalid|not enough money|no money|market (?:is )?closed|off quotes|requote|failed|\\berror\\b|trade is disabled|too many requests|timeout")
 
+    private fun collect(n: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int, budget: IntArray) {
+        if (n == null || depth > 4 || budget[0] <= 0) return
+        budget[0]--
+        n.text?.let { sb.append(it).append(' ') }
+        n.contentDescription?.let { sb.append(it).append(' ') }
+        for (i in 0 until n.childCount) collect(n.getChild(i), sb, depth + 1, budget)
+    }
+
+    /** Text of the tapped view, including everything nested up to 4 levels inside it. */
     private fun labelOf(event: AccessibilityEvent): String {
         val sb = StringBuilder()
         event.text?.forEach { sb.append(it).append(' ') }
         event.contentDescription?.let { sb.append(it).append(' ') }
-        val src = event.source
-        if (src != null) {
-            src.text?.let { sb.append(it).append(' ') }
-            src.contentDescription?.let { sb.append(it).append(' ') }
-            for (i in 0 until minOf(src.childCount, 6)) {
-                val ch = src.getChild(i) ?: continue
-                ch.text?.let { sb.append(it).append(' ') }
-                ch.contentDescription?.let { sb.append(it).append(' ') }
-            }
-        }
+        collect(event.source, sb, 0, intArrayOf(30))
         return sb.toString().trim().lowercase()
     }
 
-    private fun isTradeButton(label: String): Boolean {
-        if (label.isBlank() || label.length > 60) return false
-        if (RX_PLACE_BTN.matches(label)) return true
-        return RX_TRADE_BTN.containsMatchIn(label) && !RX_NOT_BTN.containsMatchIn(label)
+    /** MT5's internal view ids of the tapped view and what is nested in it (e.g. "buy_button"). */
+    private fun idsOf(event: AccessibilityEvent): String {
+        val ids = LinkedHashSet<String>()
+        fun walk(n: AccessibilityNodeInfo?, depth: Int) {
+            if (n == null || depth > 3 || ids.size >= 8) return
+            n.viewIdResourceName?.substringAfter("id/")?.let { if (it.isNotBlank()) ids.add(it.lowercase()) }
+            for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
+        }
+        walk(event.source, 0)
+        return ids.joinToString(",")
     }
+
+    private val RX_ID_BTN = Regex("(?:^|[^a-z])(?:buy|sell)(?:[^a-z]|$)")
+    private val RX_CLOSE_BTN = Regex("^close (?:buy|sell)\\b")
+
+    private fun isTradeButton(label: String, ids: String = ""): Boolean {
+        if (label.length <= 60) {
+            if (RX_PLACE_BTN.matches(label)) return true
+            if (label.isNotBlank() && RX_TRADE_BTN.containsMatchIn(label) && !RX_NOT_BTN.containsMatchIn(label)) return true
+        }
+        // fallback for buttons with no readable text: judge by MT5's internal view id
+        return ids.isNotBlank() && RX_ID_BTN.containsMatchIn(ids) && !RX_NOT_BTN.containsMatchIn(ids)
+    }
+
+    @Volatile private var closeArmedAt = 0L
+    @Volatile private var closeDialogSeen = false
+    private val RX_CONFIRM = setOf("ok", "yes", "confirm", "close")
 
     private fun screenText(service: AccessibilityService, event: AccessibilityEvent): String {
         val sb = StringBuilder()
@@ -332,14 +354,44 @@ object Mt5Sounds {
 
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             val label = labelOf(event)
-            if (debug(c)) log(c, "click: \"${label.take(60)}\" class=${event.className} match=${isTradeButton(label)}")
-            if (isTradeButton(label)) {
+            val ids = idsOf(event)
+            val trade = isTradeButton(label, ids)
+            if (debug(c)) log(c, "click: \"${label.take(50)}\" ids=[${ids.take(60)}] class=${event.className} match=$trade")
+
+            // Close a position: the menu item "Close buy 0.10". If MT5 then shows a confirm dialog, the sound
+            // plays when you press OK; with no dialog it plays a moment after the tap.
+            if (RX_CLOSE_BTN.containsMatchIn(label.trim())) {
+                closeArmedAt = now
+                closeDialogSeen = false
+                val snap = now
+                main.postDelayed({
+                    if (closeArmedAt == snap && !closeDialogSeen) {
+                        closeArmedAt = 0L
+                        log(c, "close -> closed (no confirm dialog)")
+                        play(c, Ev.CLOSED)
+                    }
+                }, 1500)
+                return
+            }
+            if (closeArmedAt != 0L && now - closeArmedAt < 20_000 && label.trim() in RX_CONFIRM) {
+                closeArmedAt = 0L
+                log(c, "close confirmed -> closed")
+                play(c, Ev.CLOSED)
+                return
+            }
+
+            if (trade) {
                 play(c, Ev.TAP)
                 armedAt = now
                 lastSeen = ""
-                log(c, "tap: \"${label.take(60)}\"")
+                log(c, "tap: \"${label.take(40)}\" ids=[${ids.take(40)}]")
             }
             return
+        }
+
+        if (closeArmedAt != 0L && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.className?.toString()?.contains("Dialog", ignoreCase = true) == true) {
+            closeDialogSeen = true
         }
 
         val armed = armedAt

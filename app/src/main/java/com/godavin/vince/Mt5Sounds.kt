@@ -64,6 +64,14 @@ object Mt5Sounds {
     fun enabled(c: Context) = prefs(c).getBoolean(K_ENABLED, false)
     fun setEnabled(c: Context, on: Boolean) { prefs(c).edit().putBoolean(K_ENABLED, on).apply() }
 
+    fun debug(c: Context) = prefs(c).getBoolean("debug", false)
+    fun setDebug(c: Context, on: Boolean) { prefs(c).edit().putBoolean("debug", on).apply() }
+
+    /** In-memory only: package name + time of the last tap Android reported to VINCE (any app). Lets us tell
+     *  "the service isn't getting taps at all" apart from "it gets them but MT5's button isn't recognised". */
+    @Volatile var lastClickPkg = ""
+    @Volatile var lastClickAt = 0L
+
     fun evEnabled(c: Context, e: Ev) = prefs(c).getBoolean("on_${e.key}", true)
     fun setEvEnabled(c: Context, e: Ev, on: Boolean) { prefs(c).edit().putBoolean("on_${e.key}", on).apply() }
 
@@ -313,6 +321,10 @@ object Mt5Sounds {
 
     fun onAccessibility(service: AccessibilityService, event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            lastClickPkg = pkg
+            lastClickAt = System.currentTimeMillis()
+        }
         if (pkg != PKG5 && pkg != PKG4) return
         val c = service.applicationContext
         if (!enabled(c)) return
@@ -320,6 +332,7 @@ object Mt5Sounds {
 
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             val label = labelOf(event)
+            if (debug(c)) log(c, "click: \"${label.take(60)}\" class=${event.className} match=${isTradeButton(label)}")
             if (isTradeButton(label)) {
                 play(c, Ev.TAP)
                 armedAt = now

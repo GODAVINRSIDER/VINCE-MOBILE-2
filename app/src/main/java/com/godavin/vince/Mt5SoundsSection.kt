@@ -75,6 +75,20 @@ fun Mt5SoundsSection() {
     }
     Spacer(modifier = Modifier.height(8.dp))
 
+    var debugOn by remember { mutableStateOf(Mt5Sounds.debug(context)) }
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("Debug: log every tap in MT5", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+        Switch(checked = debugOn, onCheckedChange = { debugOn = it; Mt5Sounds.setDebug(context, it) })
+    }
+    val clickAgo = (System.currentTimeMillis() - Mt5Sounds.lastClickAt) / 1000
+    Text(
+        "Last tap Android reported to VINCE (any app): " +
+            if (Mt5Sounds.lastClickAt == 0L) "none yet. If you've tapped things and this stays empty, switch the VINCE accessibility service off and on again."
+            else "${Mt5Sounds.lastClickPkg}, ${clickAgo}s ago",
+        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
     Text(
         "Notification access (fills, TP, SL, closes): " + if (notifOn) "ON" else "OFF - turn it on below",
         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
@@ -144,7 +158,11 @@ fun Mt5SoundsSection() {
     }
     Spacer(modifier = Modifier.height(8.dp))
     ButtonGrid(
-        BtnSpec("Refresh") { tick++ },
+        BtnSpec("Refresh") {
+            tick++
+            val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+            message = "Refreshed at $stamp: ${Mt5Sounds.logLines(context).size} log entries."
+        },
         BtnSpec("Clear log", enabled = lines.isNotEmpty()) { Mt5Sounds.clearLog(context); tick++ },
         perRow = 2
     )

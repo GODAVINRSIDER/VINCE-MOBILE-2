@@ -58,6 +58,10 @@ object DeviceActions {
         "^(?:please\\s+)?(?:turn|switch)\\s+(on|off)\\s+(?:the\\s+)?(wi-?fi|bluetooth|mobile data|data|airplane(?:\\s+mode)?)$", OPTS
     )
 
+    private val QR_SCAN = Regex(
+        "^(?:please\\s+)?(?:open\\s+|start\\s+|launch\\s+)?(?:(?:the\\s+)?qr(?:\\s*code)?\\s+scanner|scan\\s+(?:a\\s+|this\\s+|the\\s+)?(?:wi-?fi\\s+)?(?:qr(?:\\s*code)?|barcode))$", OPTS
+    )
+
     @Volatile private var torchOn = false
 
     fun handle(context: Context, rawText: String): String? {
@@ -73,6 +77,15 @@ object DeviceActions {
             val q = m.groupValues[1].trim()
             val url = "https://www.google.com/search?q=" + Uri.encode(q)
             return launch(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)), "Searching Google for \"$q\".", "I couldn't open a browser.")
+        }
+
+        if (QR_SCAN.matches(text)) {
+            return try {
+                QrScanActivity.launch(context)
+                "Opening the QR scanner."
+            } catch (e: Exception) {
+                "I couldn't open the QR scanner."
+            }
         }
 
         TIMER_2.find(text)?.let { return startTimer(context, toSeconds(it.groupValues[1].toInt(), it.groupValues[2])) }

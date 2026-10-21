@@ -52,7 +52,12 @@ class VinceAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* VINCE only acts on command */ }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // v2.9 - the only thing that reacts to events on its own: MT5 trade sounds, and only for the MT5 app.
+        // Everything else VINCE does with this service still happens only on command.
+        if (event == null) return
+        try { Mt5Sounds.onAccessibility(this, event) } catch (e: Exception) { }
+    }
     override fun onInterrupt() {}
 
     // ------------------------------------------------------------------

@@ -403,6 +403,11 @@ fun DashboardScreen(
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuickActionTile("Scan QR code", Modifier.weight(1f), onClick = { QrScanActivity.launch(context) })
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             CallQuickActionTile(onClick = onOpenCall)
         }
 

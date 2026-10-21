@@ -83,6 +83,12 @@ class VinceNotificationListener : NotificationListenerService() {
         }
     }
 
+    // v2.9 - MT5 trade sounds (ignores every app except MetaTrader)
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        if (sbn == null) return
+        try { Mt5Sounds.onNotification(applicationContext, sbn) } catch (e: Exception) { }
+    }
+
     override fun onListenerConnected() { instance = this }
     override fun onListenerDisconnected() { if (instance === this) instance = null }
     override fun onDestroy() { if (instance === this) instance = null; super.onDestroy() }

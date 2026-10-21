@@ -358,6 +358,10 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        PanelCard { Mt5SoundsSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         PanelCard { VoiceSettingsSection() }
 
         Spacer(modifier = Modifier.height(20.dp))

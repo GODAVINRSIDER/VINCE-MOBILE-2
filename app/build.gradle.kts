@@ -12,8 +12,8 @@ android {
         applicationId = "com.godavin.vince"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.8-phone"
+        versionCode = 11
+        versionName = "2.9-phone"
     }
 
     // Fix - every GitHub Actions build used to generate a brand-new random
@@ -82,4 +82,8 @@ dependencies {
     // lets suspend functions .await() a Firebase Task directly, instead of
     // wrapping every call in a manual callback->coroutine bridge
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    // v2.9 - QR scanner: Google's code-scanner screen (no camera permission) + on-device image decoding
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 }

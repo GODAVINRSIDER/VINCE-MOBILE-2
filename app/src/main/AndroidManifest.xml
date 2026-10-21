@@ -197,5 +197,11 @@
             android:excludeFromRecents="true" />
 
         <receiver android:name=".LocationReceiver" android:exported="false" />
+
+        <!-- v2.9 - QR scanner screen. -->
+        <activity android:name=".QrScanActivity" android:exported="false" />
+
+        <!-- v2.9 - asks Google Play services to download the scanner UI module ahead of first use. -->
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />
     </application>
 </manifest>

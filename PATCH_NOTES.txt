@@ -1,3 +1,36 @@
+v2.9-phone (versionCode 11) - QR scanner + MT5 trade sounds   [CUMULATIVE: includes everything from v2.8]
+
+APPLY: unzip over your project (zip root is app/). New files: QrParser.kt, QrScanActivity.kt, Mt5Sounds.kt, Mt5SoundsSection.kt.
+Changed: build.gradle.kts (2 new dependencies), AndroidManifest.xml, accessibility_service_config.xml, VinceAccessibilityService.kt,
+VinceNotificationListener.kt, DashboardScreen.kt, MainActivity.kt, DeviceActions.kt, BrainRouter.kt, WhatCanYouDo.kt.
+
+1. QR SCANNER - Home > Quick actions > "Scan QR code", or say "scan qr" / "scan wifi qr code". Uses Google's scanner screen (no camera
+   permission). Shows what the code holds with the right buttons:
+   - Wi-Fi code: name, security, hidden flag, password (hidden until you tap Show). "Connect" saves the network through Android's own
+     add-network dialog (Android 11+); on older Android or WEP it copies the password and opens Wi-Fi settings.
+   - Link: shows the real website name, warns on http, shortened links, raw IPs, look-alike characters; Open / Copy / Share / Ask VINCE.
+   - Phone, SMS, email, map location, contact card (Add to contacts), plain text (Ask VINCE / Google it).
+   - "Scan from image" reads a QR out of a screenshot or photo.
+   - Authenticator (2FA) codes are recognised and never read out or sent anywhere. Wi-Fi passwords are never sent to an AI either.
+   First use may need internet once: Google downloads the scanner module.
+
+2. MT5 TRADE SOUNDS - Settings > "MT5 trade sounds". Seven events, each with its own on/off, built-in tone, Test, and Choose-your-own
+   sound file (WAV / MP3, up to ~3 MB): Buy/Sell pressed, filled, pending triggered, TP hit, SL hit, closed, rejected.
+   Needs two things switched on in Android: Notification access (already used by VINCE) and the VINCE accessibility service.
+   - Buy/Sell press: the accessibility service sees the tap in MT5 and plays the sound instantly, then watches MT5's screen for ~8 s
+     for the result and plays "filled" or "rejected".
+   - Notifications from MT5 cover pending triggers, SL, TP, closes, and a fallback "filled".
+   - Only MT5 (net.metaquotes.metatrader5 / metatrader4) is looked at. Nothing from other apps is read or stored.
+   - Turn off MT5's own order sound so the two don't overlap, and set VINCE's battery use to Unrestricted.
+
+IMPORTANT - NOT TESTED AGAINST REAL MT5: MT5's button labels and notification wording are not documented and can differ by broker and
+language. The keyword lists are at the top of Mt5Sounds.kt. The card "Recent MT5 activity seen" at the bottom of the settings section logs
+what VINCE actually read and which event it picked. First test: place a small demo trade, then look at that log. If a sound is wrong or
+missing, send me those log lines and I will tune the matching.
+Also not compile-tested here (no Android SDK). First look at: the scanner opening, a Wi-Fi QR, the Test buttons, one demo trade.
+
+----
+
 v2.8-phone (versionCode 10) - new logo, HUD home ring, persona-coloured UI, chat search   [CUMULATIVE: includes everything from v2.7]
 
 APPLY: unzip this over your project (zip root is app/). Then DELETE these two old files (a zip can't delete them):

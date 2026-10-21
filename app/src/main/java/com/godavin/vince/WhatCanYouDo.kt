@@ -25,7 +25,7 @@ DAVINA - planner and creative
 Plans and focus. Brainstorming, naming, and arguing the other side of an idea. Explaining anything simply and quizzing you on it.
 
 On your phone
-Reminders and timers, "remember that ...", open apps, flashlight, volume, music, battery, Wi-Fi and Bluetooth pages, call or message people (you press send). "Where am I" gives your exact address and coordinates. "Where have I been" lists places from the last 48 hours. "Navigate to ..." opens Google Maps. With Phone control on I can read and operate the screen after your yes.
+Reminders and timers, "remember that ...", open apps, flashlight, volume, music, battery, Wi-Fi and Bluetooth pages, call or message people (you press send). "Where am I" gives your exact address and coordinates. "Where have I been" lists places from the last 48 hours. "Navigate to ..." opens Google Maps. With Phone control on I can read and operate the screen after your yes. "Scan QR" opens a scanner for Wi-Fi codes (I can add the network), links, contacts and more. In Settings, MT5 trade sounds plays your own sounds for Buy/Sell presses, fills, TP, SL and closes on MetaTrader 5 mobile.
 
 On my own
 Morning, midday and evening check-ins from VINCE, DAVINA and CLARA (Settings > Proactive check-ins). Calls to PC-VINCE.

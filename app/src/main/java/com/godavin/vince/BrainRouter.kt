@@ -223,6 +223,8 @@ object BrainRouter {
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
         val memoryBlock = StructuredMemory.buildContextBlock(context)
+        // Shared hub - where the user left off on the PC (local cache, instant; see HubRepository).
+        val hubBlock = HubRepository.hubBlock(context)
 
         // v2.6 - real-time location (and the 48h/7-day places) only when the message
         // is actually about where you are or have been.
@@ -371,7 +373,7 @@ object BrainRouter {
 
         val contextBlock = listOf(
             persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, styleInstruction,
-            currentDateGrounding(mayGreet(history)), memoryBlock, locationBlock, searchBlock, uncertaintyDisclaimer
+            currentDateGrounding(mayGreet(history)), memoryBlock, hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -380,6 +382,7 @@ object BrainRouter {
         // Fire-and-forget on the side: never awaited, never blocks the
         // reply below, and any failure inside is swallowed - best-effort
         // only, exactly like StructuredMemory's own save() already is.
+        HubRepository.noteExchange(context, userMessage, persona.name)
         backgroundScope.launch {
             try {
                 MemoryExtractor.extractAndSave(context, userMessage)

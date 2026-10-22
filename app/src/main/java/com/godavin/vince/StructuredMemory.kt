@@ -70,7 +70,7 @@ object StructuredMemory {
         return (0 until facts.length()).map { facts.getString(it) }
     }
 
-    fun addFact(context: Context, factText: String): Boolean {
+    fun addFact(context: Context, factText: String, share: Boolean = true): Boolean {
         val cleaned = factText.trim().trimEnd('.')
         if (cleaned.isBlank()) return false
 
@@ -89,6 +89,7 @@ object StructuredMemory {
         }
 
         save(context, data)
+        if (share) HubRepository.pushFact(context, cleaned)   // shared with VINCE 3.0 on the PC (queued, never blocks)
         return true
     }
 

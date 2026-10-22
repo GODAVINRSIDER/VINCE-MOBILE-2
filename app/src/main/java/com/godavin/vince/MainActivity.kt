@@ -56,11 +56,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        try {
+            HubRepository.flushNow(applicationContext)   // leaving the app: write the "where we left off" note now
+        } catch (e: Exception) {
+            // best-effort
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
         LocationTracker.restore(this)   // v2.6 - re-arm the place memory if it was on
+        try {
+            HubRepository.start(applicationContext)   // v2.10 - shared hub with VINCE 3.0 (background, never blocks startup)
+        } catch (e: Exception) {
+            // the hub is optional - the app works without it
+        }
 
         // Stage 13 - ask for notification permission up front so reminders
         // can actually show when they fire, rather than silently doing
@@ -367,6 +381,10 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         PanelCard { LocationSection() }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        PanelCard { HubSection() }
 
         Spacer(modifier = Modifier.height(20.dp))
 

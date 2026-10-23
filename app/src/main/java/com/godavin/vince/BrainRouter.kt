@@ -54,6 +54,16 @@ object BrainRouter {
             "asks for history. Frame all advice, guidance and examples for today and what is " +
             "practical now."
 
+    // v2.10.1 - the SPECS-glasses case: the persona invented product details, tied them to MetaTrader "because the user is a
+    // trader", then claimed to have searched. Always on, for every persona.
+    private const val HONESTY_RULE =
+        "Honesty rule: never say or imply you searched, looked something up or checked online unless a LIVE WEB " +
+            "RESULTS block is present in this message. If you are not certain what a specific product, company, " +
+            "person, place or event is, say so plainly (for example: I don't know much about that one), then ask " +
+            "or offer to look it up. Never invent features, specs, partnerships or details, and never link " +
+            "something to the user's trading or tools unless the user said that. A short honest I'm not sure " +
+            "always beats a confident guess."
+
     // v2.7 - JARVIS/FRIDAY-style: offers a take and a next step without being asked, pushes back,
     // and is not only about trading.
     private const val PROACTIVE_STYLE =
@@ -295,7 +305,10 @@ object BrainRouter {
         val searchNeeded = allowSearch && (forced || WebSearchTool.shouldSearch(userMessage))
         val timeSensitive = allowSearch && (forced || WebSearchTool.needsSearch(userMessage))
 
-        fun groundingPrefix() =
+        fun groundingPrefix(usedQuery: String) =
+            "Search that was run: \"$usedQuery\". If these results are not clearly about the specific subject " +
+                "the user asked about, say you could not find reliable information on it - do not summarise " +
+                "unrelated results and do not fill gaps from memory or invent details. " +
             "LIVE WEB RESULTS, fetched seconds ago. This is the newest information available and " +
                 "it is the truth about the world right now. Each result is tagged with its publish " +
                 "date when known; when results disagree, the most recently published one wins. " +
@@ -327,12 +340,12 @@ object BrainRouter {
                     "one-paragraph summary. Use headings in plain text if that helps, still no " +
                     "Markdown symbols:\n$deepResult"
             } else {
-                WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays)
-                    .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
+                WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays, patient = forced)
+                    .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix(searchQuery) + it } ?: ""
             }
         } else if (allowSearch && tavilyKey.isNotBlank() && searchNeeded) {
-            WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays)
-                .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix() + it } ?: ""
+            WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays, patient = forced)
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix(searchQuery) + it } ?: ""
         } else {
             ""
         }
@@ -343,7 +356,12 @@ object BrainRouter {
 
         // Search was wanted but produced nothing (no key, network down, zero hits).
         // Only matters for time-sensitive asks; never talks about "training data".
-        val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank() && timeSensitive) {
+        val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank() && !timeSensitive && tavilyKey.isNotBlank()) {
+            // v2.10.1 - the wide gate searched a plain question, nothing usable came back: don't bluff about specifics.
+            "A live search for this message returned nothing usable. If the question is about a specific product, " +
+                "company, person or event you are not certain about, say you could not verify it instead of guessing. " +
+                "Ordinary advice or conversation needs no caveat."
+        } else if (searchNeeded && searchBlock.isBlank() && timeSensitive) {
             if (tavilyKey.isBlank()) {
                 "Live search is not set up (no Tavily key in Settings), so you could not pull live " +
                     "data for this message. Do not state specific current facts (prices, levels, " +
@@ -372,7 +390,7 @@ object BrainRouter {
         }
 
         val contextBlock = listOf(
-            persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, styleInstruction,
+            persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, HONESTY_RULE, styleInstruction,
             currentDateGrounding(mayGreet(history)), memoryBlock, hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }

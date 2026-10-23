@@ -43,6 +43,15 @@ object WebSearchTool {
         .callTimeout(4, TimeUnit.SECONDS)
         .build()
 
+    // v2.10.1 - when the user explicitly asks to search ("search about it online"), give the call room on a slow mobile
+    // network instead of the 4s fast-path - a timed-out search silently becomes "answer from memory", which is how invented
+    // answers happen.
+    private val patientClient = client.newBuilder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(9, TimeUnit.SECONDS)
+        .build()
+
     private val TRIGGER_PHRASES = listOf(
         "latest", "current", "currently", "recent", "recently", "this week",
         "this month", "this year", "today's", "today", "tonight", "yesterday",
@@ -121,34 +130,57 @@ object WebSearchTool {
         return cleaned.split(" ").size >= 5
     }
 
-    /** Builds the Tavily query: strips the swipe-reply wrapper and glues very
-     * short follow-ups ("and silver?") onto the previous user message so the
-     * search still has a subject. */
+    // v2.10.1 - "search about it online and tell me what you find" used to be sent to Tavily AS IS (10 words, so the old
+    // "short follow-up" glue never applied) - a query with no subject, which returns random articles that the model then
+    // dutifully summarised. Now the command words are stripped and, when what is left has no real subject (or points back
+    // with it / that / they ...), the previous message is used as the subject.
+    private val GREETING_PREFIX = Regex("^(hi|hello|hey|yo)\\b( (vince|clara|davina))?[,!.:]*\\s*", RegexOption.IGNORE_CASE)
+    private val COMMAND_FLUFF = listOf(
+        Regex("\\b(please|kindly)\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(can|could|would) you\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(search|look\\s?up|google|find out|check)( (about|for|up|on|into))?\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(online|on the web|on the internet|on google)\\b", RegexOption.IGNORE_CASE),
+        Regex("\\bwhat you (find|found|get|see)\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(and )?(then )?(tell|let) me( know)?\\b", RegexOption.IGNORE_CASE)
+    )
+    private val REFERENTS = setOf("it", "its", "this", "that", "they", "them", "their", "those", "these", "he", "she", "him", "her")
+    private val FILLER = setOf("the", "a", "an", "and", "or", "of", "to", "me", "you", "about", "on", "in", "is", "are", "was",
+        "were", "do", "does", "did", "for", "with", "please", "up", "so", "what", "whats", "now", "look", "find", "show")
+
+    /** Builds the Tavily query: strips the swipe-reply wrapper, greetings and "search ... online" boilerplate, and when the
+     * message has no subject of its own (or only "it/that/they"), uses the previous message as the subject. */
     fun buildQuery(userMessage: String, history: List<ChatMessage>): String {
-        var q = userMessage.replace(Regex("^\\(Replying to earlier message: \"[^\"]*\"\\)\\s*"), "").trim()
-        val words = q.split(Regex("\\s+")).size
-        if (words <= 4) {
-            val prev = history.lastOrNull { it.fromUser }?.text?.trim()
-            if (!prev.isNullOrBlank() && !prev.equals(q, ignoreCase = true)) {
-                q = prev.take(160) + " " + q
-            }
-        }
-        return q.take(300)
+        val raw = userMessage.replace(Regex("^\\(Replying to earlier message: \"[^\"]*\"\\)\\s*"), "").trim()
+        val q = GREETING_PREFIX.replace(raw, "").trim().ifBlank { raw }
+        var core = q
+        for (r in COMMAND_FLUFF) core = r.replace(core, " ")
+        core = core.replace(Regex("[^A-Za-z0-9' ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val words = core.split(" ").filter { it.isNotBlank() }
+        val content = words.filter { it.lowercase() !in FILLER && it.lowercase() !in REFERENTS }
+        val hasReferent = words.any { it.lowercase() in REFERENTS }
+        val needsContext = content.size < 2 || (hasReferent && words.size <= 12) || q.split(Regex("\\s+")).size <= 4
+        if (!needsContext) return q.take(300)
+
+        val prev = history.filter { it.fromUser }.map { GREETING_PREFIX.replace(it.text.trim(), "").trim() }
+            .lastOrNull { it.isNotBlank() && !it.equals(q, ignoreCase = true) && !it.equals(raw, ignoreCase = true) }
+        if (prev.isNullOrBlank()) return q.take(300)
+        val extra = if (content.size >= 1) " " + content.joinToString(" ") else ""
+        return (prev.take(200) + extra).take(300)
     }
 
     /** News-first live search (hard recency filter), then a general search if
      * the news index has nothing (timeless questions like "how does an FVG
      * work"). Returns blank on zero results. */
-    suspend fun liveSearch(apiKey: String, query: String, days: Int): Result<String> {
+    suspend fun liveSearch(apiKey: String, query: String, days: Int, patient: Boolean = false): Result<String> {
         val started = System.currentTimeMillis()
-        val news = search(apiKey, query, topic = "news", days = days)
+        val news = search(apiKey, query, topic = "news", days = days, patient = patient)
         // v2.5 - a failed or timed-out news search is returned as-is (no second
         // slow call); only a genuine "zero results" falls back to a general
         // search, and only if the first call was quick.
         if (news.isFailure) return news
         if (!news.getOrNull().isNullOrBlank()) return news
-        if (System.currentTimeMillis() - started > 1500) return news
-        val general = search(apiKey, query, topic = "general")
+        if (!patient && System.currentTimeMillis() - started > 1500) return news
+        val general = search(apiKey, query, topic = "general", patient = patient)
         return if (general.isSuccess) general else news
     }
 
@@ -239,7 +271,8 @@ object WebSearchTool {
         depth: String = "basic",
         maxResults: Int = 5,
         topic: String = "general",
-        days: Int? = null
+        days: Int? = null,
+        patient: Boolean = false
     ): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("No Tavily API key saved."))
@@ -266,7 +299,7 @@ object WebSearchTool {
                     .post(body)
                     .build()
 
-                (if (depth == "basic") fastClient else client).newCall(request).execute().use { response ->
+                (if (depth == "basic") (if (patient) patientClient else fastClient) else client).newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
                         return@withContext Result.failure(

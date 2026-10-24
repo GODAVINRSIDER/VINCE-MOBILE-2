@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VinceLog.ensure(applicationContext)   // v2.11 - crash + problem log for "diagnose yourself"
         VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
         LocationTracker.restore(this)   // v2.6 - re-arm the place memory if it was on

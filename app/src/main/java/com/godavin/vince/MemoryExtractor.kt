@@ -74,7 +74,7 @@ object MemoryExtractor {
     /** Same minimal Gemini->Groq->OpenRouter fallback as DeepResearch's
      * quickAsk / TitleGenerator - a trivial single-shot call that doesn't
      * need persona tone or conversation history. */
-    private suspend fun quickAsk(context: Context, prompt: String): String? {
+    suspend fun quickAsk(context: Context, prompt: String): String? {
         val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
         if (geminiKey.isNotBlank()) {
             GeminiClient.sendMessage(geminiKey, prompt).getOrNull()?.let { return it }

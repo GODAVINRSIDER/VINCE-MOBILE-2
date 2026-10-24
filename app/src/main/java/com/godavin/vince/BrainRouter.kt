@@ -56,7 +56,7 @@ object BrainRouter {
 
     // v2.10.1 - the SPECS-glasses case: the persona invented product details, tied them to MetaTrader "because the user is a
     // trader", then claimed to have searched. Always on, for every persona.
-    private const val HONESTY_RULE =
+    internal const val HONESTY_RULE =
         "Honesty rule: never say or imply you searched, looked something up or checked online unless a LIVE WEB " +
             "RESULTS block is present in this message. If you are not certain what a specific product, company, " +
             "person, place or event is, say so plainly (for example: I don't know much about that one), then ask " +
@@ -94,7 +94,7 @@ object BrainRouter {
             "news heads-ups, a daily briefing and an end-of-day journal check-in, keep the " +
             "user's trading rules and today's plan, search the web and run multi-step " +
             "research (when a search key is set), remember facts across every chat, float " +
-            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), operate the phone when Phone control is on (read the screen, tap, type, scroll, open apps, send WhatsApp/SMS or notification replies after the user says yes, and prepare/place MetaTrader 5 orders only from a complete user instruction after an explicit yes, with a lot cap), read incoming message notifications, scan QR codes (Wi-Fi codes it can add to the phone, links it can check, contacts, phone numbers and more; the user says 'scan QR' or taps Scan QR code on Home), play custom sounds for MetaTrader 5 mobile button presses, fills, TP, SL and closes (Settings > MT5 trade sounds), draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, make in-app calls to PC-VINCE, tell the user their exact location (street and area, coordinates, accuracy) and list the places they have been in the last 48 hours or 7 days when place memory is switched on, and send proactive morning, midday and evening check-ins at times set in Settings. You cannot " +
+            "as a widget over other apps, hold a hands-free continuous voice conversation (tap the mic once, keep talking, say end convo to finish), operate the phone when Phone control is on (read the screen, tap, type, scroll, open apps, send WhatsApp/SMS or notification replies after the user says yes, and prepare/place MetaTrader 5 orders only from a complete user instruction after an explicit yes, with a lot cap), read incoming message notifications, scan QR codes (Wi-Fi codes it can add to the phone, links it can check, contacts, phone numbers and more; the user says 'scan QR' or taps Scan QR code on Home), play custom sounds for MetaTrader 5 mobile button presses, fills, TP, SL and closes (Settings > MT5 trade sounds), draw candlestick and smart-money patterns (morning star, engulfing, FVG, order block, BOS, CHoCH, liquidity sweep) accurately by code, make in-app calls to PC-VINCE, tell the user their exact location (street and area, coordinates, accuracy) and list the places they have been in the last 48 hours or 7 days when place memory is switched on, and send proactive morning, midday and evening check-ins at times set in Settings, show a small grey sources line under answers that used a live web search, keep standing lessons from the user's corrections (say 'my lessons', 'forget lesson 2' or 'clear lessons'), and check itself (say 'run self test', 'run live self test' or 'diagnose yourself'). You cannot " +
             "place or manage trades from the phone, cannot generate AI pictures (that was removed - you can only draw chart patterns by code), you are not linked to any trading " +
             "account (so you do not know balance, open trades or profit), you cannot place " +
             "calls or send messages by yourself (the user presses the button), cannot flip " +
@@ -227,8 +227,13 @@ object BrainRouter {
         persona: Persona,
         history: List<ChatMessage>,
         onStatus: ((String) -> Unit)? = null,
-        allowSearch: Boolean = true
+        allowSearch: Boolean = true,
+        probe: Boolean = false
     ): Prepared {
+        // v2.11 - log + search-trace bookkeeping (probe = a self-test question: leaves no trace anywhere)
+        VinceLog.ensure(context)
+        SearchTrace.reset()
+        WebSearchTool.traceHosts.clear()
         // Stage 13 - durable memory. Stage 14 - persona tone, so the
         // active persona actually reasons/responds differently, not just
         // displays a different name and color.
@@ -354,6 +359,20 @@ object BrainRouter {
             onStatus?.invoke(Narration.reading(persona, WebSearchTool.lastSources))
         }
 
+        // v2.11 - the grey line under the answer: what the search really did (from the search, not from the model).
+        if (!probe) {
+            val traceLine: String? = when {
+                searchBlock.isNotBlank() -> SearchTrace.forResults(WebSearchTool.traceHosts.toList(), searchQuery)
+                willSearch -> {
+                    VinceLog.w(context, "search", "no usable results for \"${searchQuery.take(80)}\"")
+                    SearchTrace.NO_RESULTS
+                }
+                searchNeeded && timeSensitive && tavilyKey.isBlank() -> SearchTrace.NO_KEY
+                else -> null
+            }
+            SearchTrace.set(traceLine)
+        }
+
         // Search was wanted but produced nothing (no key, network down, zero hits).
         // Only matters for time-sensitive asks; never talks about "training data".
         val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank() && !timeSensitive && tavilyKey.isNotBlank()) {
@@ -391,7 +410,7 @@ object BrainRouter {
 
         val contextBlock = listOf(
             persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, HONESTY_RULE, styleInstruction,
-            currentDateGrounding(mayGreet(history)), memoryBlock, hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
+            currentDateGrounding(mayGreet(history)), memoryBlock, Lessons.block(context), hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -400,12 +419,20 @@ object BrainRouter {
         // Fire-and-forget on the side: never awaited, never blocks the
         // reply below, and any failure inside is swallowed - best-effort
         // only, exactly like StructuredMemory's own save() already is.
-        HubRepository.noteExchange(context, userMessage, persona.name)
-        backgroundScope.launch {
-            try {
-                MemoryExtractor.extractAndSave(context, userMessage)
-            } catch (e: Exception) {
-                // best-effort - a failed extraction must never affect the chat
+        if (!probe) {
+            HubRepository.noteExchange(context, userMessage, persona.name)
+            val previousReply = history.lastOrNull { !it.fromUser }?.text.orEmpty()
+            backgroundScope.launch {
+                try {
+                    MemoryExtractor.extractAndSave(context, userMessage)
+                } catch (e: Exception) {
+                    // best-effort - a failed extraction must never affect the chat
+                }
+                try {
+                    Lessons.learn(context, userMessage, previousReply)   // v2.11 - corrections become standing lessons
+                } catch (e: Exception) {
+                    // best-effort
+                }
             }
         }
 
@@ -438,8 +465,9 @@ object BrainRouter {
         persona: Persona = Persona.VINCE,
         history: List<ChatMessage> = emptyList(),
         onStatus: ((String) -> Unit)? = null,
-        allowSearch: Boolean = true
-    ): String = route(context, userMessage, persona, history, null, onStatus, allowSearch)
+        allowSearch: Boolean = true,
+        probe: Boolean = false
+    ): String = route(context, userMessage, persona, history, null, onStatus, allowSearch, probe)
 
     /** v2.5 - same answer, but [onDelta] receives the text piece by piece as it is
      * written (called from a background thread). The full reply is still returned. */
@@ -459,9 +487,10 @@ object BrainRouter {
         history: List<ChatMessage>,
         onDelta: DeltaSink?,
         onStatus: ((String) -> Unit)?,
-        allowSearch: Boolean = true
+        allowSearch: Boolean = true,
+        probe: Boolean = false
     ): String {
-        val prepared = prepare(context, userMessage, persona, history, onStatus, allowSearch)
+        val prepared = prepare(context, userMessage, persona, history, onStatus, allowSearch, probe)
         val backends = buildBackends(context, prepared)
         if (backends.isEmpty()) {
             return "No API keys saved yet - add at least one (Gemini, Groq, Mistral, Cloudflare or OpenRouter) in Settings."
@@ -469,6 +498,9 @@ object BrainRouter {
         val timeout = if (prepared.maxTokens > CHAT_MAX_TOKENS) RESEARCH_TIMEOUT_MS else OVERALL_TIMEOUT_MS
         val onSlow: (() -> Unit)? = if (onStatus == null) null else ({ onStatus(Narration.slow(persona)) })
         val (text, failures) = runRace(backends, onDelta, timeout, onSlow)
+        if (failures.isNotEmpty()) {   // v2.11 - provider trouble goes in the log even when another provider saved the day
+            VinceLog.w(context, "brain", "provider failures (answered anyway: ${text != null}): " + failures.joinToString(" | ").take(500))
+        }
         if (text != null) return text
         return "All providers failed:\n" + failures.joinToString("\n")
     }

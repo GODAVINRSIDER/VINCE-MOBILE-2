@@ -30,7 +30,10 @@ data class ChatMessage(
     // denormalized snippet of what was replied to, stored directly so
     // rendering never needs to look the original message back up.
     val replyToId: String? = null,
-    val replyToPreview: String? = null
+    val replyToPreview: String? = null,
+    // v2.11 - the small grey "Sources: ..." line shown under a reply that used a live web search.
+    // Display only: never spoken, never sent back to the AI.
+    val sources: String? = null
 )
 
 data class ChatThread(
@@ -83,7 +86,8 @@ object ConversationStore {
                                 id = m.optString("id").ifBlank { UUID.randomUUID().toString() },
                                 imagePath = if (m.has("imagePath") && !m.isNull("imagePath")) m.optString("imagePath") else null,
                                 replyToId = if (m.has("replyToId") && !m.isNull("replyToId")) m.optString("replyToId") else null,
-                                replyToPreview = if (m.has("replyToPreview") && !m.isNull("replyToPreview")) m.optString("replyToPreview") else null
+                                replyToPreview = if (m.has("replyToPreview") && !m.isNull("replyToPreview")) m.optString("replyToPreview") else null,
+                                sources = if (m.has("sources") && !m.isNull("sources")) m.optString("sources") else null
                             )
                         )
                     }
@@ -123,6 +127,7 @@ object ConversationStore {
                 mo.put("imagePath", m.imagePath)
                 mo.put("replyToId", m.replyToId)
                 mo.put("replyToPreview", m.replyToPreview)
+                mo.put("sources", m.sources)
                 msgArr.put(mo)
             }
             obj.put("messages", msgArr)

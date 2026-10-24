@@ -27,6 +27,7 @@ object PersonalTools {
         MessageActions.handle(context, text)?.let { return it }
         DeviceActions.handle(context, text)?.let { return it }
 
+        Lessons.handleCommand(context, text)?.let { return it }   // v2.11 - "my lessons", "forget lesson 2"
         StructuredMemory.handleMemoryCommand(context, text)?.let { return it }
 
         val rawAppName = AppLauncher.extractAppNameFromCommand(text)

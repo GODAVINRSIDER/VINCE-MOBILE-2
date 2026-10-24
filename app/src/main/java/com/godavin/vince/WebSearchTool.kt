@@ -32,6 +32,8 @@ object WebSearchTool {
 
     /** Sites used by the most recent search - only used to narrate progress. */
     @Volatile var lastSources: List<String> = emptyList()
+    /** v2.11 - every site used by the searches of the current reply (deep research runs several). Cleared per reply. */
+    val traceHosts = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     // v2.5 - an ordinary lookup (basic depth) must never hold up the reply for
     // long: connect in 3s, whole call done in 4s, otherwise it counts as "could
@@ -338,6 +340,7 @@ object WebSearchTool {
                         summary.append("- $dateTag$title: $content\n")
                     }
                     lastSources = hosts.take(2)
+                    for (h in hosts) if (h !in traceHosts) traceHosts.add(h)
                     Result.success(summary.toString().trim())
                 }
             } catch (e: Exception) {

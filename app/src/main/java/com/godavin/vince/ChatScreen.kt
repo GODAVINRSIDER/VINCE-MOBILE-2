@@ -281,6 +281,7 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
 
             val localReply = RealTimeTools.handleLocalCommand(context, text)
                 ?: PersonalTools.handleLocalCommand(context, text)
+                ?: SelfCheck.handle(context, text)   // v2.11 - "run self test" / "run live self test" / "diagnose yourself"
 
             // v2.5 - the reply streams into a live bubble as it is written, and
             // (if replies are spoken) VINCE starts talking on the first finished
@@ -324,12 +325,14 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
             }
 
             TradeIdea.split(reply).second?.let { Mt5Trader.rememberIdea(it) }
+            // v2.11 - what the web search did for this reply (null for local commands and small talk)
+            val sourcesLine: String? = if (localReply != null) null else SearchTrace.take()
             val replyMsg: ChatMessage
             if (liveIndex >= 0 && liveIndex < messages.size) {
-                replyMsg = messages[liveIndex].copy(text = reply)
+                replyMsg = messages[liveIndex].copy(text = reply, sources = sourcesLine)
                 messages[liveIndex] = replyMsg
             } else {
-                replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name)
+                replyMsg = ChatMessage(fromUser = false, text = reply, persona = activePersona.name, sources = sourcesLine)
                 messages.add(replyMsg)
             }
             streamingLive = false
@@ -863,6 +866,11 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
                                 parsedReply.second?.let { idea ->
                                     Spacer(modifier = Modifier.height(10.dp))
                                     TradeIdeaCard(idea)
+                                }
+                                // v2.11 - small grey line: which sites the live search used (or that it found nothing).
+                                msg.sources?.takeIf { it.isNotBlank() && !msg.fromUser }?.let { src ->
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(src, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                                 }
                             }
                         }

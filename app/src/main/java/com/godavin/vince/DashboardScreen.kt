@@ -273,18 +273,18 @@ fun DashboardScreen(
                     delay(400)
                 }
             }
-            PersonaRingHud(
-                active = activePersona,
-                status = when {
-                    isListening -> "LISTENING"
-                    speakingNow -> "SPEAKING"
-                    else -> "STANDBY"
-                },
-                onPersonaTapped = { picked ->
-                    activePersona = picked
-                    PersonaState.setActive(context, picked)
-                }
-            )
+            val ringStatus = when {
+                isListening -> "LISTENING"
+                speakingNow -> "SPEAKING"
+                else -> "STANDBY"
+            }
+            val ringTapped: (Persona) -> Unit = { picked ->
+                activePersona = picked
+                PersonaState.setActive(context, picked)
+            }
+            // v2.12 - the holographic reactor replaces the old ring (switch it off in Settings to get the old ring back)
+            if (HoloStartup.lookOn(context)) ReactorHome(activePersona, ringStatus, ringTapped)
+            else PersonaRingHud(active = activePersona, status = ringStatus, onPersonaTapped = ringTapped)
         }
 
         Spacer(modifier = Modifier.height(16.dp))

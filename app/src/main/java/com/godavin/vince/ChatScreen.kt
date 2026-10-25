@@ -684,6 +684,7 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
         Spacer(modifier = Modifier.height(8.dp))
 
         Box(modifier = Modifier.weight(1f)) {
+            if (messages.isEmpty() && HoloStartup.lookOn(context)) HoloEmptyChat(activePersona)   // v2.12 - breathing reactor on a new chat
             // Fix - wrap the whole list in SelectionContainer so message
             // text can actually be long-pressed and copied, same as any
             // normal Android text - it never could be before this.

@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
         VinceLog.ensure(applicationContext)   // v2.11 - crash + problem log for "diagnose yourself"
         VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
+        HoloStartup.plan(this)   // v2.12 - decides this launch's persona before the screen is drawn
         LocationTracker.restore(this)   // v2.6 - re-arm the place memory if it was on
         try {
             HubRepository.start(applicationContext)   // v2.10 - shared hub with VINCE 3.0 (background, never blocks startup)
@@ -129,7 +130,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             VinceTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    RootScreen(startThreadId)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        RootScreen(startThreadId)
+                        HoloStartupLayer()   // v2.12 - cinematic opening, black from the first frame
+                    }
                 }
             }
         }
@@ -153,6 +157,11 @@ fun RootScreen(startThreadId: String? = null) {
         mutableStateOf<Screen>(if (startThreadId != null) Screen.Chat(startThreadId) else Screen.Home)
     }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // v2.12 - the opening's "Resume chat" / "New chat" buttons
+    val busThread = StartupBus.openThread.value
+    LaunchedEffect(busThread) { if (busThread != null) { screen = Screen.Chat(busThread); StartupBus.openThread.value = null } }
+    val busNew = StartupBus.openNew.value
+    LaunchedEffect(busNew) { if (busNew) { screen = Screen.Chat(java.util.UUID.randomUUID().toString()); StartupBus.openNew.value = false } }
     // Security/PIN layer - unlocked state lives only in this composition,
     // so it resets on every fresh process launch (force-close, reboot,
     // task kill) but not on ordinary background/foreground within the
@@ -374,6 +383,8 @@ fun SettingsScreen(onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         PanelCard { Mt5SoundsSection() }
+        Spacer(modifier = Modifier.height(16.dp))
+        PanelCard { HoloSection() }   // v2.12
 
         Spacer(modifier = Modifier.height(20.dp))
 

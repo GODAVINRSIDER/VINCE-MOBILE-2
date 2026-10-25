@@ -65,6 +65,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // v2.12.1 - coming back to the app replays the cinematic entrance (full intro only when the timer has run out)
+    override fun onStart() {
+        super.onStart()
+        HoloStartup.onForeground(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        HoloStartup.onBackground()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         VinceLog.ensure(applicationContext)   // v2.11 - crash + problem log for "diagnose yourself"

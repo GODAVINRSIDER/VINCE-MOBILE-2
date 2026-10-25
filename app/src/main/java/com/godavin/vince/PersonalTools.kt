@@ -44,8 +44,11 @@ object PersonalTools {
             return if (openedLabel != null) {
                 ActivityLog.addEvent(context, "Opened $openedLabel")
                 "Opening $openedLabel."
+            } else if (text.trim().lowercase().startsWith("open ") && appName.split(Regex("\\s+")).size <= 2 && !AppLauncher.looksLikeSentenceNotApp(appName)) {
+                "I couldn't find an app called \"$appName\" on this phone. If you meant a website, say its address, like $appName.com."
             } else {
-                "I couldn't find an app called \"$appName\" on this phone."
+                // v2.12.1 - "start over", "launch a plan ..." and the like are normal sentences: let the AI answer
+                return null
             }
         }
 

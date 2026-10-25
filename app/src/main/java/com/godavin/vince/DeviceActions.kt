@@ -30,7 +30,12 @@ object DeviceActions {
     private val OPTS = setOf(RegexOption.IGNORE_CASE)
 
     private val OPEN_SITE = Regex(
-        "^(?:open|go to|visit|launch|take me to)\\s+((?:https?://)?(?:www\\.)?[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)*\\.(?:com|org|net|io|co|ke|app|dev|info|me|ai|tv|trade|finance|news)(?:/\\S*)?)$", OPTS
+        "^(?:please\\s+)?(?:open|go to|visit|launch|take me to|browse to|load)\\s+(?:(?:the|my|this)\\s+)?(?:(?:website|site|link|page|url)\\s+)?" +
+            "((?:https?://)?(?:www\\.)?[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)*\\.(?:com|org|net|io|co|ke|app|dev|info|me|ai|tv|trade|finance|news|xyz|site|online|store|tech|club|live|blog|shop|cc|us|uk|ca|de|fr|in|za|ng|tz|ug|gov|edu|biz)(?:/\\S*)?)$", OPTS
+    )
+    // v2.12.1 - a full link anywhere in an "open ..." sentence: "open this link https://x.com/a for me"
+    private val OPEN_URL = Regex(
+        "^(?:please\\s+)?(?:open|go to|visit|launch|take me to|browse to|load)\\b.*?((?:https?://|www\\.)[^\\s]+)", OPTS
     )
     private val GOOGLE = Regex("^google\\s+(.+)$", OPTS)
     private val TIMER_2 = Regex("^(?:set|start|run)\\s+(?:a\\s+)?timer\\s+(?:for|of)\\s+(\\d+)\\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)$", OPTS)
@@ -66,6 +71,12 @@ object DeviceActions {
 
     fun handle(context: Context, rawText: String): String? {
         val text = rawText.replace('\u2019', '\'').trim().trimEnd('.', '!', '?')
+
+        OPEN_URL.find(text)?.let { m ->
+            val raw = m.groupValues[1].trimEnd(',', ')', ']', '"', '\'')
+            val url = if (raw.startsWith("http", ignoreCase = true)) raw else "https://$raw"
+            return launch(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)), "Opening $raw.", "I couldn't open a browser for $raw.")
+        }
 
         OPEN_SITE.find(text)?.let { m ->
             val raw = m.groupValues[1]

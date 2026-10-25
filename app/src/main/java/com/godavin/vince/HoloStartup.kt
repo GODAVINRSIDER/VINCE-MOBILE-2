@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +65,7 @@ object StartupBus {
     val openThread = mutableStateOf<String?>(null)
     val openNew = mutableStateOf(false)
     val replay = mutableStateOf(false)
+    val resumePlan = mutableStateOf<HoloStartup.Plan?>(null)   // v2.12.1 - set when you come back to the app
 }
 
 /**
@@ -86,6 +88,10 @@ object HoloStartup {
 
     private var cached: Plan? = null
     private var consumed = false
+    private var leftAt = 0L
+    @Volatile var overlayActive = false
+    /** Coming back to the app counts as 'opening' it only if you were away at least this long (a permission dialog or a quick app switch must not replay it). */
+    private const val RETURN_AFTER_MS = 20_000L
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -113,6 +119,27 @@ object HoloStartup {
         val plan = Plan(persona, full, if (Math.random() < .5) "sir" else "Vince")
         cached = plan
         return plan
+    }
+
+    /** v2.12.1 - called when the app leaves the screen. */
+    fun onBackground() { leftAt = android.os.SystemClock.elapsedRealtime() }
+
+    /**
+     * v2.12.1 - called when the app comes back. After [RETURN_AFTER_MS] away it plays the entrance again - the full intro if the
+     * timer has run out, otherwise just the short one - with the persona you are on (it does not switch persona under you).
+     */
+    @Synchronized
+    fun onForeground(c: Context) {
+        val left = leftAt
+        leftAt = 0L
+        if (left == 0L || !consumed || overlayActive || !lookOn(c)) return
+        if (android.os.SystemClock.elapsedRealtime() - left < RETURN_AFTER_MS) return
+        val now = System.currentTimeMillis()
+        val p = prefs(c)
+        val last = p.getLong("intro_last", 0L)
+        val full = last <= 0L || last > now || now - last >= introSeconds(c) * 1000L
+        if (full) p.edit().putLong("intro_last", now).apply()
+        StartupBus.resumePlan.value = Plan(PersonaState.getActive(c), full, if (Math.random() < .5) "sir" else "Vince")
     }
 
     /** The startup screen takes the plan once per process (a screen rotation must not replay it). */
@@ -199,6 +226,14 @@ fun HoloStartupLayer() {
             active = HoloStartup.Plan(PersonaState.getActive(context), true, if (Math.random() < .5) "sir" else "Vince")
         }
     }
+    val resumePlan = StartupBus.resumePlan.value
+    LaunchedEffect(resumePlan) {
+        if (resumePlan != null) {
+            StartupBus.resumePlan.value = null
+            if (active == null) active = resumePlan
+        }
+    }
+    SideEffect { HoloStartup.overlayActive = active != null }
     val plan = active
     if (plan != null) {
         StartupOverlay(plan) { threadId, newChat ->

@@ -28,15 +28,39 @@ object AppLauncher {
 
     private val PREFIXES = listOf("open ", "launch ", "start ")
 
-    /** Returns the app name to look up if [text] looks like an
-     * "open/launch/start <app>" command, otherwise null. */
+    // Words that mean the sentence is about something else (a website, a file, a chat ...) rather than an app's name.
+    private val NOT_AN_APP = Regex(
+        "\\b(website|site|link|links|url|page|tab|browser tab|file|files|folder|document|doc|chat|conversation|thread|message|email|mail|" +
+            "account|door|window|image|photo|picture|video|pdf|report|list|account|idea|question|topic|menu)\\b",
+        RegexOption.IGNORE_CASE
+    )
+    private val LEADING = Regex("^(?:the|my|up|a|an)\\s+", RegexOption.IGNORE_CASE)
+
+    /** True when the 'name' reads like part of a sentence (a website, a file, a chat ...). Only used AFTER no installed app matched,
+     * so real apps called Files, Mail, Video ... still open. */
+    fun looksLikeSentenceNotApp(name: String): Boolean = NOT_AN_APP.containsMatchIn(name)
+
+    /**
+     * Returns the app name to look up if [text] is a short, clean "open/launch/start <app>" command, otherwise null.
+     * v2.12.1 - anything else that merely starts with "open" ("open a website for me", "open the link above", "start over",
+     * "open this idea and ...", a URL ...) now goes on to the AI / the website opener instead of being treated as an app name.
+     */
     fun extractAppNameFromCommand(text: String): String? {
-        val trimmed = text.trim()
+        val trimmed = text.trim().trimEnd('.', '!')
         val lower = trimmed.lowercase()
+        if (lower.contains("http") || lower.contains("www.") || lower.contains("?") || lower.contains("\n")) return null
         for (prefix in PREFIXES) {
             if (lower.startsWith(prefix)) {
-                val name = trimmed.substring(prefix.length).trim()
-                return name.ifBlank { null }
+                var name = trimmed.substring(prefix.length).trim()
+                name = name.replace(Regex("^(?:please\\s+)", RegexOption.IGNORE_CASE), "")
+                name = LEADING.replace(name, "").trim()
+                name = name.replace(Regex("\\s+(?:app|application)$", RegexOption.IGNORE_CASE), "").trim()
+                if (name.isBlank()) return null
+                // "open spotify and play something" keeps working: only the part before and/then/& has to look like an app name
+                val first = Regex("\\s+(?:and|then|&)\\s+", RegexOption.IGNORE_CASE).split(name, 2)[0].trim()
+                if (first.isBlank() || first.split(Regex("\\s+")).size > 3 || first.length > 32) return null
+                if (first.any { it in ",;:()[]{}\"" }) return null
+                return name
             }
         }
         return null

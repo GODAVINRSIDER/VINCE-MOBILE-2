@@ -214,6 +214,8 @@ private fun introLines(p: Persona, addr: String, topic: String?): List<String> {
 
 private const val CPS = 17f
 
+private fun voiceHeard(): Boolean = try { VoiceOutput.isSpeaking } catch (e: Exception) { false }
+
 /** Mounted on top of the whole app in MainActivity. Black from the very first frame; removes itself when finished. */
 @Composable
 fun HoloStartupLayer() {
@@ -254,6 +256,8 @@ private fun StartupOverlay(plan: HoloStartup.Plan, onFinish: (String?, Boolean) 
     val pieces = remember(persona) { mkPieces(persona) }
     var t by remember { mutableStateOf(0f) }
     var typeT0 by remember { mutableStateOf(-1f) }
+    var speechEndT by remember { mutableStateOf(-1f) }   // v2.12.2 - when the voice finished (shows whatever text is left)
+    val cps = CPS * persona.rate                        // a slower voice (Clara) types slower
     var closeAt by remember { mutableStateOf(-1f) }
     var result by remember { mutableStateOf<Pair<String?, Boolean>>(Pair(null, false)) }
 
@@ -283,8 +287,17 @@ private fun StartupOverlay(plan: HoloStartup.Plan, onFinish: (String?, Boolean) 
         if (full) {
             delay(5200)
             if (closeAt < 0f) {
-                try { VoiceOutput.speak(lines.joinToString(" "), persona) } catch (e: Exception) { }
-                typeT0 = t + .3f
+                var spoke = false
+                try { VoiceOutput.speak(lines.joinToString(" "), persona); spoke = true } catch (e: Exception) { }
+                // v2.12.2 - start typing when the voice is really HEARD: ElevenLabs first has to fetch the audio, so the old fixed
+                // 0.3 s start made the words run ahead of Clara's voice. Waits up to ~4.5 s, then types anyway (voice muted / failed).
+                var waited = 0
+                while (spoke && waited < 90 && !voiceHeard()) { delay(50); waited++ }
+                typeT0 = t
+                if (spoke && voiceHeard()) {
+                    while (voiceHeard() && closeAt < 0f) delay(100)
+                    speechEndT = t
+                }
             }
         }
     }
@@ -297,9 +310,10 @@ private fun StartupOverlay(plan: HoloStartup.Plan, onFinish: (String?, Boolean) 
 
     val starts = remember(typeT0) {
         var s = typeT0
-        lines.map { val x = s; s += it.length / CPS + .7f; x }
+        lines.map { val x = s; s += it.length / cps + .7f; x }
     }
-    val doneT = if (typeT0 >= 0f && lines.isNotEmpty()) starts.last() + lines.last().length / CPS + .3f else Float.MAX_VALUE
+    val typedDoneT = if (typeT0 >= 0f && lines.isNotEmpty()) starts.last() + lines.last().length / cps + .3f else Float.MAX_VALUE
+    val doneT = if (speechEndT >= 0f) minOf(typedDoneT, speechEndT + .4f) else typedDoneT
     val showButtons = full && t > doneT
     val endT = 6.0f
     LaunchedEffect(!full && t > endT, showButtons && t > doneT + 25f) {
@@ -395,7 +409,7 @@ private fun StartupOverlay(plan: HoloStartup.Plan, onFinish: (String?, Boolean) 
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 lines.forEachIndexed { i, ln ->
-                    val n = ((t - starts[i]) * CPS).toInt().coerceIn(0, ln.length)
+                    val n = if (speechEndT >= 0f) ln.length else ((t - starts[i]) * cps).toInt().coerceIn(0, ln.length)
                     val last = i == lines.size - 1
                     Text(
                         buildAnnotatedString {

@@ -214,13 +214,14 @@ object VoiceOutput {
  * 3,250.40 are never cut in half. Very short first sentences are held back so
  * the voice does not stutter out one-word chunks.
  */
-class SentenceSpeaker(private val persona: Persona) {
+class SentenceSpeaker(private val persona: Persona, private val gate: () -> Boolean = { true }) {
     private val buf = StringBuilder()
     private val full = StringBuilder()
     private var spokeAny = false
     private var chunked: Boolean? = null
 
     fun feed(delta: String) {
+        if (!gate()) { buf.clear(); return }   // v2.12.3 - voice switched off mid-reply
         if (chunked == null) chunked = VoiceOutput.elevenWillSpeak(persona)
         full.append(delta)
         // The phone's own voice leaves a long gap between queued sentences, so it gets the
@@ -232,6 +233,7 @@ class SentenceSpeaker(private val persona: Persona) {
     }
 
     fun finish() {
+        if (!gate()) return
         if (chunked != true) {
             if (full.isNotBlank()) VoiceOutput.speak(full.toString(), persona)
             return
@@ -240,6 +242,7 @@ class SentenceSpeaker(private val persona: Persona) {
     }
 
     private fun flush(final: Boolean) {
+        if (!gate()) { buf.clear(); return }
         while (true) {
             val cut = findCut(final)
             if (cut <= 0) break

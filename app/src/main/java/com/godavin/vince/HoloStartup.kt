@@ -288,7 +288,7 @@ private fun StartupOverlay(plan: HoloStartup.Plan, onFinish: (String?, Boolean) 
             delay(5200)
             if (closeAt < 0f) {
                 var spoke = false
-                try { VoiceOutput.speak(lines.joinToString(" "), persona); spoke = true } catch (e: Exception) { }
+                if (VoiceMute.get(context)) { try { VoiceOutput.speak(lines.joinToString(" "), persona); spoke = true } catch (e: Exception) { } }
                 // v2.12.2 - start typing when the voice is really HEARD: ElevenLabs first has to fetch the audio, so the old fixed
                 // 0.3 s start made the words run ahead of Clara's voice. Waits up to ~4.5 s, then types anyway (voice muted / failed).
                 var waited = 0

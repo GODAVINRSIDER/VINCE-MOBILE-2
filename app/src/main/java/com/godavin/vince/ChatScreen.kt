@@ -83,7 +83,7 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
     var streamingLive by remember { mutableStateOf(false) }
     // v2.6 - what VINCE is doing right now ("searching the web for..."), shown while it works
     var statusText by remember { mutableStateOf<String?>(null) }
-    var speakReplies by remember { mutableStateOf(true) }
+    var speakReplies by remember { mutableStateOf(VoiceMute.get(context)) }
     // Fix - swipe-to-reply target (WhatsApp/Instagram style) - set when
     // a message is swiped, shown as a preview above the input, cleared
     // once sent or cancelled.
@@ -287,8 +287,8 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
             // (if replies are spoken) VINCE starts talking on the first finished
             // sentence instead of waiting for the whole answer.
             var liveIndex = -1
-            val speaker = if (speakReplies) SentenceSpeaker(activePersona) else null
-            val narrator = StatusNarrator(scope, activePersona, speakReplies) { statusText = it }
+            val speaker = if (speakReplies) SentenceSpeaker(activePersona, gate = { speakReplies }) else null
+            val narrator = StatusNarrator(scope, activePersona, speakReplies, gate = { speakReplies }) { statusText = it }
             val reply: String
             if (localReply != null) {
                 reply = localReply
@@ -402,7 +402,7 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
                 val localReply = notice
                     ?: RealTimeTools.handleLocalCommand(context, spoken)
                     ?: PersonalTools.handleLocalCommand(context, spoken)
-                val narrator = StatusNarrator(scope, activePersona, speakReplies) { statusText = it }
+                val narrator = StatusNarrator(scope, activePersona, speakReplies, gate = { speakReplies }) { statusText = it }
                 val reply = try {
                     localReply ?: BrainRouter.sendMessage(
                         context, spoken, activePersona, historySnapshot,
@@ -634,7 +634,7 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
                 color = activePersona.color()
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { speakReplies = !speakReplies }) {
+                TextButton(onClick = { speakReplies = !speakReplies; VoiceMute.set(context, speakReplies) }) {   // v2.12.3 - remembered; Off also silences what is being read now
                     Text(if (speakReplies) "Voice: On" else "Voice: Off")
                 }
                 TextButton(onClick = onBack) {

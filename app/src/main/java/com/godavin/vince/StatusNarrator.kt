@@ -74,6 +74,7 @@ class StatusNarrator(
     private val scope: CoroutineScope,
     private val persona: Persona,
     private val speak: Boolean,
+    private val gate: () -> Boolean = { true },
     private val onText: (String?) -> Unit
 ) {
     private var job: Job? = null
@@ -88,7 +89,7 @@ class StatusNarrator(
         val first = spoken == 0
         job = scope.launch {
             delay(if (first) 900L else 600L)
-            if (closed) return@launch
+            if (closed || !gate()) return@launch
             VoiceOutput.speakChunk(text, persona, first = first)
             spoken++
         }

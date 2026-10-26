@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        HoloStartup.onBackground()   // v2.12.1 - remember when we left, to replay the entrance when you come back
         try {
             HubRepository.flushNow(applicationContext)   // leaving the app: write the "where we left off" note now
         } catch (e: Exception) {
@@ -69,11 +70,6 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         HoloStartup.onForeground(this)
-    }
-
-    override fun onStop() {
-        super.onStop()
-        HoloStartup.onBackground()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

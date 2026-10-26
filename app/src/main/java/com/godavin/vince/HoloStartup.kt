@@ -142,6 +142,24 @@ object HoloStartup {
         StartupBus.resumePlan.value = Plan(PersonaState.getActive(c), full, if (Math.random() < .5) "sir" else "Vince")
     }
 
+    /**
+     * v2.12.4 - called from MainActivity.onCreate. Swiping VINCE away from recents does NOT always end its process (it has background
+     * services), and the "already shown" flag used to live as long as the process - so the next opening played nothing and went
+     * straight to the PIN. A fresh opening of the screen (no saved state) is now always a new launch: next persona, new decision
+     * full-or-short, entrance plays. A screen rotation (saved state present) is not.
+     */
+    @Synchronized
+    fun newLaunch(c: Context, fresh: Boolean) {
+        if (fresh) {
+            cached = null
+            consumed = false
+            leftAt = 0L
+            overlayActive = false
+            StartupBus.resumePlan.value = null
+        }
+        plan(c)
+    }
+
     /** The startup screen takes the plan once per process (a screen rotation must not replay it). */
     @Synchronized
     fun takeStartup(c: Context): Plan? {
@@ -288,7 +306,8 @@ private fun StartupOverlay(plan: HoloStartup.Plan, onFinish: (String?, Boolean) 
             delay(5200)
             if (closeAt < 0f) {
                 var spoke = false
-                if (VoiceMute.get(context)) { try { VoiceOutput.speak(lines.joinToString(" "), persona); spoke = true } catch (e: Exception) { } }
+                // v2.12.4 - the opening always speaks: it is VINCE introducing itself, whatever the chat's Voice switch says
+                try { VoiceOutput.speak(lines.joinToString(" "), persona); spoke = true } catch (e: Exception) { }
                 // v2.12.2 - start typing when the voice is really HEARD: ElevenLabs first has to fetch the audio, so the old fixed
                 // 0.3 s start made the words run ahead of Clara's voice. Waits up to ~4.5 s, then types anyway (voice muted / failed).
                 var waited = 0

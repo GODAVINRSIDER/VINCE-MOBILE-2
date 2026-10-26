@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
         VinceLog.ensure(applicationContext)   // v2.11 - crash + problem log for "diagnose yourself"
         VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
-        HoloStartup.plan(this)   // v2.12 - decides this launch's persona before the screen is drawn
+        HoloStartup.newLaunch(this, savedInstanceState == null)   // v2.12.4 - every fresh opening is a new launch; decides its persona before the screen is drawn
         LocationTracker.restore(this)   // v2.6 - re-arm the place memory if it was on
         try {
             HubRepository.start(applicationContext)   // v2.10 - shared hub with VINCE 3.0 (background, never blocks startup)

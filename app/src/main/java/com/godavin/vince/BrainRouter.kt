@@ -410,7 +410,7 @@ object BrainRouter {
 
         val contextBlock = listOf(
             persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, HONESTY_RULE, styleInstruction,
-            currentDateGrounding(mayGreet(history)), memoryBlock, Lessons.block(context), hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
+            currentDateGrounding(mayGreet(history)), memoryBlock, Lessons.block(context), if (probe) "" else Lessons.nudge(context), hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
         )
             .filter { it.isNotBlank() }
             .joinToString(" ")

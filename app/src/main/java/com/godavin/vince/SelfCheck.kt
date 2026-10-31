@@ -101,7 +101,8 @@ object SelfCheck {
         try {
             val facts = StructuredMemory.getFacts(context).size
             val lessons = Lessons.all(context).size
-            out.add(Row("PASS", "Memory is readable", "$facts facts, $lessons lessons"))
+            val waiting = Lessons.pendingCount(context)
+            out.add(Row("PASS", "Memory is readable", "$facts facts, $lessons lessons" + if (waiting > 0) ", $waiting waiting for your OK" else ""))
         } catch (e: Exception) {
             out.add(Row("FAIL", "Memory is readable", e.javaClass.simpleName))
         }

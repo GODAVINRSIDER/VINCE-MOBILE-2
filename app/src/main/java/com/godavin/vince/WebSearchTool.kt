@@ -101,7 +101,7 @@ object WebSearchTool {
         "\\b(search|look\\s?up|look for|find out|research|google|check online|online|latest|" +
             "current|currently|recent|recently|right now|now|today|tonight|tomorrow|this week|" +
             "this month|news|update|updates|outlook|forecast|what'?s happening|trending|" +
-            "price of|live|breaking|anything new|what'?s new|so far)\\b",
+            "price of|live|breaking|anything new|what'?s new|so far|retry|try again|search again|rerun|re-run)\\b",
         RegexOption.IGNORE_CASE
     )
 

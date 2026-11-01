@@ -85,6 +85,15 @@ object SelfCheck {
             val junk = WebSearchTool.isRelevantText("Cheap flights to Paris - kiwi.com compare airlines", anchors)
             val good = WebSearchTool.isRelevantText("Boda boda fares in Nairobi CBD: Kimathi Street riders charge Sh100", anchors)
             out.add(Row(if (!junk && good && anchors.contains("nairobi") && anchors.contains("boda")) "PASS" else "FAIL", "Search relevance guard", "anchors=${anchors.joinToString(",")}"))
+            // v2.13.2 - hard cap checks, run offline against the exact failure from the screenshot
+            val claim = "Yes - I ran a live web search just now, and the recent sources list the fare at KSh 40."
+            val stripped = AnswerGuard.finalize(claim + " Ask the driver for a flat rate first.", true, false)
+            out.add(Row(if (!stripped.contains("KSh 40") && stripped.contains("flat rate")) "PASS" else "FAIL", "Guard removes false search claims", stripped.take(70)))
+            out.add(Row(if (AnswerGuard.isLookup("how much is a boda from Rembo to Kimathi street") && !AnswerGuard.isLookup("I feel tired and want some advice about work")) "PASS" else "FAIL", "Lookup detector"))
+            val hist = listOf(ChatMessage(fromUser = false, text = claim, sources = "No usable web results came back for this one - treat the answer as unverified."))
+            val meta = AnswerGuard.metaSearchAnswer("have you searched this results", hist)
+            out.add(Row(if (meta != null && meta.startsWith("No.")) "PASS" else "FAIL", "Did-you-search answered from the record"))
+            out.add(Row(if (AnswerGuard.scrubHistory(hist).first().text.contains("not verified online")) "PASS" else "FAIL", "Unverified old answers scrubbed from transcript"))
             out.add(Row(if (WebSearchTool.isEventQuery("is Trump still the president") && !WebSearchTool.isEventQuery("boda fare from Railways to Kimathi Street")) "PASS" else "FAIL", "News vs evergreen topic routing"))
         } catch (e: Exception) {
             out.add(Row("FAIL", "Brain checks could not run", "${e.javaClass.simpleName}: ${(e.message ?: "").take(80)}"))

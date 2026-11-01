@@ -405,6 +405,20 @@ object BrainRouter {
             ""
         }
 
+        // v2.13.2 - HARD CAP (see AnswerGuard.kt). searchFailed = a search was wanted and nothing usable came back.
+        val searchFailed = allowSearch && searchBlock.isBlank() &&
+            (willSearch || (searchNeeded && timeSensitive && tavilyKey.isBlank()))
+        val lookup = AnswerGuard.isLookup(userMessage)
+        val estimate = searchFailed && lookup && AnswerGuard.wantsGuess(userMessage)
+        val capped = searchFailed && lookup && !estimate
+        val shortCircuit: String? = if (capped) {
+            if (tavilyKey.isBlank()) AnswerGuard.NO_KEY_REPLY else AnswerGuard.NO_RESULTS_REPLY
+        } else null
+        val estimateRule = if (estimate) {
+            "The user asked for a rough guess and there are NO live results. Give a short ballpark from general " +
+                "knowledge, say plainly it is unverified, never claim a search or sources, never present it as current."
+        } else ""
+
         val styleInstruction = if (relaxConciseness) {
             "Formatting rules for your reply: no Markdown syntax (no #, ##, **, tables with " +
                 "| or ---) since this is a plain chat bubble with no Markdown rendering - " +
@@ -417,7 +431,7 @@ object BrainRouter {
 
         val contextBlock = listOf(
             persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, HONESTY_RULE, styleInstruction,
-            currentDateGrounding(mayGreet(history)), memoryBlock, Lessons.block(context), if (probe) "" else Lessons.nudge(context), hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer
+            currentDateGrounding(mayGreet(history)), memoryBlock, Lessons.block(context), if (probe) "" else Lessons.nudge(context), hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer, estimateRule
         )
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -443,7 +457,7 @@ object BrainRouter {
             }
         }
 
-        val transcript = buildTranscript(history)
+        val transcript = buildTranscript(AnswerGuard.scrubHistory(history))   // v2.13.2 - no unverified answers or search claims carried forward
 
         val fullMessage = buildString {
             if (contextBlock.isNotBlank()) {
@@ -458,10 +472,26 @@ object BrainRouter {
             append("User: $userMessage")
         }
 
-        return Prepared(fullMessage, if (relaxConciseness) RESEARCH_MAX_TOKENS else CHAT_MAX_TOKENS)
+        return Prepared(
+            fullMessage, if (relaxConciseness) RESEARCH_MAX_TOKENS else CHAT_MAX_TOKENS,
+            shortCircuit = shortCircuit,
+            ungrounded = searchFailed && lookup,
+            stripClaims = searchBlock.isBlank(),
+            estimate = estimate
+        )
     }
 
-    private class Prepared(val fullMessage: String, val maxTokens: Int)
+    private class Prepared(
+        val fullMessage: String,
+        val maxTokens: Int,
+        /** v2.13.2 - fixed reply returned WITHOUT calling the model (lookup question, search found nothing). */
+        val shortCircuit: String? = null,
+        /** search failed on a lookup question: hold the reply back (no live streaming) until it has been checked. */
+        val ungrounded: Boolean = false,
+        /** no live results were used: remove any sentence that claims a search or sources. */
+        val stripClaims: Boolean = false,
+        val estimate: Boolean = false
+    )
 
     private class Backend(val name: String, val run: suspend (DeltaSink?) -> Result<String>)
 
@@ -497,18 +527,37 @@ object BrainRouter {
         allowSearch: Boolean = true,
         probe: Boolean = false
     ): String {
+        // v2.13.2 - "did you search / what are your sources" is answered from the stored record of the last reply
+        if (!probe) {
+            AnswerGuard.metaSearchAnswer(userMessage, history)?.let { meta ->
+                SearchTrace.reset()
+                onDelta?.invoke(meta)
+                return meta
+            }
+        }
         val prepared = prepare(context, userMessage, persona, history, onStatus, allowSearch, probe)
+        // v2.13.2 - lookup question + nothing usable from the web: the model is not called at all
+        prepared.shortCircuit?.let { fixed ->
+            VinceLog.w(context, "guard", "hard cap: no model call for \"${userMessage.take(60)}\"")
+            onDelta?.invoke(fixed)
+            return fixed
+        }
         val backends = buildBackends(context, prepared)
         if (backends.isEmpty()) {
             return "No API keys saved yet - add at least one (Gemini, Groq, Mistral, Cloudflare or OpenRouter) in Settings."
         }
         val timeout = if (prepared.maxTokens > CHAT_MAX_TOKENS) RESEARCH_TIMEOUT_MS else OVERALL_TIMEOUT_MS
         val onSlow: (() -> Unit)? = if (onStatus == null) null else ({ onStatus(Narration.slow(persona)) })
-        val (text, failures) = runRace(backends, onDelta, timeout, onSlow)
+        val liveSink: DeltaSink? = if (prepared.ungrounded) null else onDelta   // held back until checked
+        val (text, failures) = runRace(backends, liveSink, timeout, onSlow)
         if (failures.isNotEmpty()) {   // v2.11 - provider trouble goes in the log even when another provider saved the day
             VinceLog.w(context, "brain", "provider failures (answered anyway: ${text != null}): " + failures.joinToString(" | ").take(500))
         }
-        if (text != null) return text
+        if (text != null) {
+            val finalText = AnswerGuard.finalize(text, prepared.stripClaims, prepared.estimate)
+            if (liveSink == null && onDelta != null) onDelta(finalText)
+            return finalText
+        }
         return "All providers failed:\n" + failures.joinToString("\n")
     }
 

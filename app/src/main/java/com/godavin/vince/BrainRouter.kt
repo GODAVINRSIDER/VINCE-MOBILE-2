@@ -313,6 +313,8 @@ object BrainRouter {
         fun groundingPrefix(usedQuery: String) =
             "Search that was run: \"$usedQuery\". If these results are not clearly about the specific subject " +
                 "the user asked about, say you could not find reliable information on it - do not summarise " +
+                "unrelated results. Answer the exact thing asked (a motorbike or boda fare is not a matatu fare or a purchase price; " +
+                "if the results are about a different thing, say so) - " +
                 "unrelated results and do not fill gaps from memory or invent details. " +
             "LIVE WEB RESULTS, fetched seconds ago. This is the newest information available and " +
                 "it is the truth about the world right now. Each result is tagged with its publish " +
@@ -322,7 +324,12 @@ object BrainRouter {
                 "who is fully up to date, and give practical guidance for today, not for some past " +
                 "year:\n"
 
-        val baseQuery = WebSearchTool.buildQuery(userMessage, history)
+        // v2.13.1 - a clean standalone query (one tiny AI rewrite, 3s cap, regex fallback) instead of chat fragments
+        val baseQuery = if (allowSearch && tavilyKey.isNotBlank() && (DeepResearch.isResearchRequest(userMessage) || searchNeeded))
+            WebSearchTool.smartQuery(context, userMessage, history)
+        else WebSearchTool.buildQuery(userMessage, history)
+        // v2.13.1 - news index only for event-style questions; fares, prices, places, how-tos use the general index
+        val newsFirst = WebSearchTool.isEventQuery(userMessage)
         val searchQuery = if (locationArea != null && LocationTools.wantsNearby(userMessage)) "$baseQuery $locationArea" else baseQuery
         val recencyDays = if (forced) 120 else SEARCH_RECENCY_DAYS
 
@@ -345,11 +352,11 @@ object BrainRouter {
                     "one-paragraph summary. Use headings in plain text if that helps, still no " +
                     "Markdown symbols:\n$deepResult"
             } else {
-                WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays, patient = forced)
+                WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays, patient = forced, newsFirst = newsFirst)
                     .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix(searchQuery) + it } ?: ""
             }
         } else if (allowSearch && tavilyKey.isNotBlank() && searchNeeded) {
-            WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays, patient = forced)
+            WebSearchTool.liveSearch(tavilyKey, searchQuery, recencyDays, patient = forced, newsFirst = newsFirst)
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { groundingPrefix(searchQuery) + it } ?: ""
         } else {
             ""
@@ -377,7 +384,7 @@ object BrainRouter {
         // Only matters for time-sensitive asks; never talks about "training data".
         val uncertaintyDisclaimer = if (searchNeeded && searchBlock.isBlank() && !timeSensitive && tavilyKey.isNotBlank()) {
             // v2.10.1 - the wide gate searched a plain question, nothing usable came back: don't bluff about specifics.
-            "A live search for this message returned nothing usable. If the question is about a specific product, " +
+            "A live search for this message returned nothing relevant. If the user asks whether you searched, say plainly that a search ran but found nothing relevant, and do not present anything as sourced. If the question is about a specific product, " +
                 "company, person or event you are not certain about, say you could not verify it instead of guessing. " +
                 "Ordinary advice or conversation needs no caveat."
         } else if (searchNeeded && searchBlock.isBlank() && timeSensitive) {
@@ -388,7 +395,7 @@ object BrainRouter {
                     "could not pull live data and that adding a Tavily key in Settings fixes it, then " +
                     "help as far as you sensibly can. Never mention training data or a cutoff."
             } else {
-                "The live search for this message just failed or returned nothing. Do not state " +
+                "The live search for this message just failed or returned nothing relevant. If the user asks whether you searched, say plainly that a search ran but found nothing relevant. Do not state " +
                     "specific current facts (prices, levels, who holds a post, latest events) as " +
                     "certain. Say in one short phrase that you could not pull live data just now and " +
                     "offer to try again, then help as far as you sensibly can. Never mention training " +

@@ -1,7 +1,9 @@
 package com.godavin.vince
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -161,7 +163,7 @@ object WebSearchTool {
         val content = words.filter { it.lowercase() !in FILLER && it.lowercase() !in REFERENTS }
         val hasReferent = words.any { it.lowercase() in REFERENTS }
         val needsContext = content.size < 2 || (hasReferent && words.size <= 12) || q.split(Regex("\\s+")).size <= 4
-        if (!needsContext) return q.take(300)
+        if (!needsContext) return core.ifBlank { q }.take(300)
 
         val prev = history.filter { it.fromUser }.map { GREETING_PREFIX.replace(it.text.trim(), "").trim() }
             .lastOrNull { it.isNotBlank() && !it.equals(q, ignoreCase = true) && !it.equals(raw, ignoreCase = true) }
@@ -170,20 +172,123 @@ object WebSearchTool {
         return (prev.take(200) + extra).take(300)
     }
 
-    /** News-first live search (hard recency filter), then a general search if
-     * the news index has nothing (timeless questions like "how does an FVG
-     * work"). Returns blank on zero results. */
-    suspend fun liveSearch(apiKey: String, query: String, days: Int, patient: Boolean = false): Result<String> {
+    /** Live search. Event-style questions (news, who holds a post, results) go news-first with a hard recency
+     * filter; everything else (fares, prices, how-tos, places) goes straight to the general index, because the
+     * news index only holds news articles and returns junk or nothing for evergreen questions. Every result must
+     * mention the key terms of the query (see anchorsOf), otherwise it is dropped - an empty return then flows
+     * into BrainRouter's honest "could not verify" path instead of summarising unrelated pages. */
+    suspend fun liveSearch(
+        apiKey: String,
+        query: String,
+        days: Int,
+        patient: Boolean = false,
+        newsFirst: Boolean = true
+    ): Result<String> {
+        val anchors = anchorsOf(query)
+        if (!newsFirst) {
+            return search(apiKey, query, topic = "general", patient = patient, anchors = anchors)
+        }
         val started = System.currentTimeMillis()
-        val news = search(apiKey, query, topic = "news", days = days, patient = patient)
-        // v2.5 - a failed or timed-out news search is returned as-is (no second
-        // slow call); only a genuine "zero results" falls back to a general
-        // search, and only if the first call was quick.
+        val news = search(apiKey, query, topic = "news", days = days, patient = patient, anchors = anchors)
+        // v2.5 - a failed or timed-out news search is returned as-is (no second slow call); only a genuine
+        // "zero results" falls back to a general search, and only if the first call was quick.
         if (news.isFailure) return news
         if (!news.getOrNull().isNullOrBlank()) return news
-        if (!patient && System.currentTimeMillis() - started > 1500) return news
-        val general = search(apiKey, query, topic = "general", patient = patient)
+        if (!patient && System.currentTimeMillis() - started > 2500) return news
+        val general = search(apiKey, query, topic = "general", patient = patient, anchors = anchors)
         return if (general.isSuccess) general else news
+    }
+
+    // v2.13.1 - is this question about an event / who-holds-what / a result (news-first), or evergreen (fares,
+    // prices, how-tos, places)? Words like "online" or "search" say nothing about it, so they are not used here.
+    private val EVENT_HINTS = listOf(
+        "latest", "recent", "recently", "today", "tonight", "yesterday", "breaking", "this week", "this month",
+        "last night", "last week", "last month", "right now", "just happened", "just announced", "news"
+    )
+
+    fun isEventQuery(text: String): Boolean {
+        val lower = text.lowercase()
+        return NEWS_KEYWORDS.any { lower.contains(it) } || EVENT_HINTS.any { lower.contains(it) } ||
+            YEAR_PATTERN.containsMatchIn(lower)
+    }
+
+    // ---- v2.13.1: clean query + relevance guard ----
+    // Real failure (Oct 2026): a boda-fare question was searched as "no search how much can it cost as fare
+    // not buying price have" - two chat messages glued together by regex - and the results were travel and
+    // cloud sites that were then shown as sources. Two fixes: (1) one tiny AI call rewrites the conversation
+    // into a clean standalone query; (2) every result must mention the key terms of that query or it is dropped.
+    private val GENERIC_WORDS = setOf(
+        "much", "many", "cost", "costs", "price", "prices", "fare", "fares", "this", "that", "with", "from",
+        "what", "when", "where", "which", "does", "will", "would", "could", "should", "have", "about", "there",
+        "their", "they", "been", "being", "into", "over", "than", "then", "some", "like", "just", "only", "also",
+        "long", "take", "takes", "best", "good", "need", "want", "trip", "ride", "today", "latest", "current",
+        "currently", "recent", "recently", "news", "update", "right", "week", "month", "year", "yesterday",
+        "tomorrow", "tell", "show", "find", "search", "online", "how", "someone", "something", "going", "get"
+    )
+
+    /** The words a relevant page must mention: query words of 4+ letters that are not generic, singularised. */
+    fun anchorsOf(query: String): Set<String> {
+        val out = LinkedHashSet<String>()
+        for (w in query.lowercase().split(Regex("[^a-z0-9]+"))) {
+            if (w.length < 4 || w in GENERIC_WORDS) continue
+            out.add(if (w.length >= 5 && w.endsWith("s")) w.dropLast(1) else w)
+            if (out.size >= 6) break
+        }
+        return out
+    }
+
+    /** True when the text mentions enough of the anchors (1 if there are 3 or fewer, otherwise 2). */
+    fun isRelevantText(text: String, anchors: Set<String>): Boolean {
+        if (anchors.isEmpty()) return true
+        val lower = text.lowercase()
+        val need = if (anchors.size <= 3) 1 else 2
+        return anchors.count { lower.contains(it) } >= need
+    }
+
+    private fun needsRewrite(raw: String, history: List<ChatMessage>): Boolean {
+        val words = raw.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.size > 6) return true
+        if (words.any { it.lowercase().trim('.', ',', '?', '!') in REFERENTS }) return true
+        if (COMMAND_FLUFF.any { it.containsMatchIn(raw) }) return true
+        return history.isNotEmpty() && words.size <= 4
+    }
+
+    /** Clean standalone search query. Falls back to the regex builder when no AI brain answers within 3s. */
+    suspend fun smartQuery(context: Context, userMessage: String, history: List<ChatMessage>): String {
+        val fallback = buildQuery(userMessage, history)
+        val raw = userMessage.replace(Regex("^\\(Replying to earlier message: \"[^\"]*\"\\)\\s*"), "").trim()
+        if (!needsRewrite(raw, history)) return fallback
+        return try {
+            val recent = history.takeLast(4).joinToString("\n") {
+                (if (it.fromUser) "User: " else "Assistant: ") + it.text.trim().take(200)
+            }
+            val prompt = "Rewrite the user's LATEST message as ONE short standalone web search query (max 12 words). " +
+                "Use the earlier messages only to fill in a missing subject or place. Keep names, places and numbers. " +
+                "Drop chat words (no, search, can you, please, rerun, tell me). Keep the exact intent: a fare or " +
+                "cost to pay for a service is not a purchase price. Reply with only the query.\n\n" +
+                (if (recent.isNotBlank()) "Earlier messages:\n$recent\n\n" else "") +
+                "Latest message: $raw"
+            val answer = withTimeoutOrNull(3000L) {
+                val geminiKey = ApiKeyStore.getKey(context, Provider.GEMINI)
+                val g = if (geminiKey.isNotBlank()) GeminiClient.sendMessage(geminiKey, prompt).getOrNull() else null
+                g ?: run {
+                    val groqKey = ApiKeyStore.getKey(context, Provider.GROQ)
+                    if (groqKey.isNotBlank()) {
+                        OpenAiCompatibleClient.sendMessage(
+                            baseUrl = "https://api.groq.com/openai/v1/chat/completions",
+                            apiKey = groqKey,
+                            model = "openai/gpt-oss-120b",
+                            userMessage = prompt,
+                            providerLabel = "Groq"
+                        ).getOrNull()
+                    } else null
+                }
+            }
+            val q = answer?.trim()?.lines()?.firstOrNull()?.trim()?.trim('"', '\'', '.', '`')?.replace(Regex("^(query|search query)\\s*:\\s*", RegexOption.IGNORE_CASE), "")?.trim().orEmpty()
+            if (q.length in 6..200) q else fallback
+        } catch (e: Exception) {
+            fallback
+        }
     }
 
     private val QUESTION_STARTERS = listOf(
@@ -274,7 +379,8 @@ object WebSearchTool {
         maxResults: Int = 5,
         topic: String = "general",
         days: Int? = null,
-        patient: Boolean = false
+        patient: Boolean = false,
+        anchors: Set<String> = emptySet()
     ): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("No Tavily API key saved."))
@@ -326,19 +432,25 @@ object WebSearchTool {
 
                     val summary = StringBuilder()
                     val hosts = mutableListOf<String>()
+                    var kept = 0
                     for (i in 0 until results.length()) {
                         val item = results.getJSONObject(i)
-                        // v2.6 - remember the sites so VINCE can say "reading reuters.com"
+                        val title = item.optString("title")
+                        val rawContent = item.optString("content")
+                        // v2.13.1 - drop results that do not mention the key terms of the query.
+                        if (!isRelevantText(title + " " + rawContent + " " + item.optString("url"), anchors)) continue
+                        kept++
+                        // v2.6 - remember the sites so VINCE can say "reading reuters.com" (only sites actually used)
                         item.optString("url").takeIf { it.isNotBlank() }?.let { u ->
                             val h = u.substringAfter("://").substringBefore("/").removePrefix("www.")
                             if (h.isNotBlank() && h !in hosts) hosts.add(h)
                         }
-                        val title = item.optString("title")
-                        val content = item.optString("content").take(if (depth == "advanced") 800 else 300)
+                        val content = rawContent.take(if (depth == "advanced") 800 else 300)
                         val published = item.optString("published_date").takeIf { it.isNotBlank() }
                         val dateTag = if (published != null) "[published: $published] " else ""
                         summary.append("- $dateTag$title: $content\n")
                     }
+                    if (kept == 0) return@withContext Result.success("")
                     lastSources = hosts.take(2)
                     for (h in hosts) if (h !in traceHosts) traceHosts.add(h)
                     Result.success(summary.toString().trim())

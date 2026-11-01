@@ -80,6 +80,12 @@ object SelfCheck {
             val b = WebSearchTool.shouldSearch("hello")
             out.add(Row(if (a && !b) "PASS" else "FAIL", "Search gate: real question vs greeting", "question=$a, greeting=$b"))
             out.add(Row(if (BrainRouter.HONESTY_RULE.contains("never say or imply you searched")) "PASS" else "FAIL", "Honesty rule is in the prompt"))
+            // v2.13.1 - relevance guard: junk pages must not count as results
+            val anchors = WebSearchTool.anchorsOf("boda boda fare from Railways to Kimathi Street Nairobi")
+            val junk = WebSearchTool.isRelevantText("Cheap flights to Paris - kiwi.com compare airlines", anchors)
+            val good = WebSearchTool.isRelevantText("Boda boda fares in Nairobi CBD: Kimathi Street riders charge Sh100", anchors)
+            out.add(Row(if (!junk && good && anchors.contains("nairobi") && anchors.contains("boda")) "PASS" else "FAIL", "Search relevance guard", "anchors=${anchors.joinToString(",")}"))
+            out.add(Row(if (WebSearchTool.isEventQuery("is Trump still the president") && !WebSearchTool.isEventQuery("boda fare from Railways to Kimathi Street")) "PASS" else "FAIL", "News vs evergreen topic routing"))
         } catch (e: Exception) {
             out.add(Row("FAIL", "Brain checks could not run", "${e.javaClass.simpleName}: ${(e.message ?: "").take(80)}"))
         }

@@ -75,6 +75,13 @@ object BrainRouter {
             "also builds their own apps and tools, runs a brand and a business, studies, and has a life. Follow " +
             "the topic they are actually on, and keep it natural and brief, one idea at a time."
 
+    // v2.14 - reminders: offered rarely and concretely, and never claimed as done by the model (only the app arms an alarm)
+    private const val REMINDER_RULE =
+        "Reminders: offer one ONLY when he mentions something he must do at a specific time, or you flag a time-bound risk. " +
+            "Never end an ordinary opinion or answer with a reminder offer. When you do offer, write exactly one sentence with a " +
+            "concrete time, like: Want me to remind you at 3pm to check the retest? Never say a reminder is set or that you will " +
+            "remind him - the app confirms that itself after he says yes."
+
     // Capabilities awareness - the personas were describing themselves as
     // "text-only" with no device access, because nothing in the prompt told
     // them what the app can actually do. Keep this list TRUTHFUL: update it
@@ -83,7 +90,7 @@ object BrainRouter {
     private const val CAPABILITIES_INSTRUCTION =
         "About yourself: you live inside VINCE Mobile, an Android app, and you are NOT a " +
             "text-only chatbot. You can hear and speak (voice in and out), see through the " +
-            "phone camera and screen, analyze uploaded images and trading charts (chart " +
+            "phone camera and screen, analyze ANY image he sends - screenshots, documents, receipts, products, photos, memes and trading charts (chart " +
             "replies can include a trade-idea card with entry, stop, target and risk-reward " +
             "read off the image), open apps and " +
             "websites, start timers, open maps, switch the flashlight, change volume, " +
@@ -430,7 +437,7 @@ object BrainRouter {
         }
 
         val contextBlock = listOf(
-            persona.roleDescription, PROACTIVE_STYLE, CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, HONESTY_RULE, styleInstruction,
+            persona.roleDescription, PROACTIVE_STYLE, REMINDER_RULE, Wit.block(context, persona.displayName), Wit.turnHint(context, userMessage), CAPABILITIES_INSTRUCTION, NOW_ONLY_RULE, HONESTY_RULE, styleInstruction,
             currentDateGrounding(mayGreet(history)), memoryBlock, Lessons.block(context), if (probe) "" else Lessons.nudge(context), hubBlock, locationBlock, searchBlock, uncertaintyDisclaimer, estimateRule
         )
             .filter { it.isNotBlank() }
@@ -554,7 +561,12 @@ object BrainRouter {
             VinceLog.w(context, "brain", "provider failures (answered anyway: ${text != null}): " + failures.joinToString(" | ").take(500))
         }
         if (text != null) {
-            val finalText = AnswerGuard.finalize(text, prepared.stripClaims, prepared.estimate)
+            var finalText = AnswerGuard.finalize(text, prepared.stripClaims, prepared.estimate)
+            if (!probe) {
+                // v2.14 - a model sentence claiming "I've set a reminder" is made true (or replaced by an honest line); an offer is remembered for "yes"
+                finalText = ReminderOffers.reconcileClaims(finalText) { cmd -> ReminderCommands.handle(context, cmd) }
+                ReminderOffers.note(finalText)
+            }
             if (liveSink == null && onDelta != null) onDelta(finalText)
             return finalText
         }

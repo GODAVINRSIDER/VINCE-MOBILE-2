@@ -31,6 +31,9 @@ object ReminderCommands {
         val text = rawText.replace('\u2019', '\'').trim().trimEnd('.', '!')
         val zone = ZoneId.systemDefault()
 
+        // v2.14 - "yes" / "set it" after VINCE offered a reminder: run the remembered offer as a real "remind me ..." command
+        ReminderOffers.takeForReply(text)?.let { offered -> return handle(context, offered) }
+
         if (CANCEL.containsMatchIn(text)) {
             val all = ReminderStore.getAll(context)
             all.forEach { ReminderScheduler.cancel(context, it.id, it.message); ReminderStore.remove(context, it.id) }

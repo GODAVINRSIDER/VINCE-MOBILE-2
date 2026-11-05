@@ -68,6 +68,11 @@ private const val DEFAULT_VISION_PROMPT = "Look at this image and describe what 
     "stay flexible to whatever the image actually is, don't force a chart-analysis framing " +
     "onto something that isn't one."
 
+// v2.14 - a typed caption used to reach the vision model with NO framing, so a bare "what do you think?" defaulted to a chart read.
+private const val VISION_FRAME = "First work out what this image actually is (a trading chart, a screenshot, a document, a receipt, a " +
+    "product, a photo, a meme, text, anything) and answer about THAT. Only talk about price action if it really is a chart; if it is " +
+    "not, never mention charts. His message: "
+
 @Composable
 fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -131,7 +136,7 @@ fun ChatScreen(threadId: String, focusMessageId: String? = null, onBack: () -> U
         val stagedKind = pendingImageKind
         if (stagedImage != null && !sending) {
             val typed = text
-            val question = typed.ifBlank { DEFAULT_VISION_PROMPT } + TradeIdea.PROMPT_SUFFIX
+            val question = (if (typed.isBlank()) DEFAULT_VISION_PROMPT else VISION_FRAME + typed) + TradeIdea.PROMPT_SUFFIX
             val imagePath = ImageStore.save(context, stagedImage)
             val displayText = typed.ifBlank { null }
             val userMsg = ChatMessage(

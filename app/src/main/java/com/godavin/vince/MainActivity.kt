@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
         VinceLog.ensure(applicationContext)   // v2.11 - crash + problem log for "diagnose yourself"
         VoiceSession.restoreAudioAfterCrash(this)
         VoiceOutput.init(this)
+        BtAudio.start(applicationContext)   // v2.15 - Bluetooth headset detection and routing (never blocks startup)
         HoloStartup.newLaunch(this, savedInstanceState == null)   // v2.12.4 - every fresh opening is a new launch; decides its persona before the screen is drawn
         LocationTracker.restore(this)   // v2.6 - re-arm the place memory if it was on
         try {

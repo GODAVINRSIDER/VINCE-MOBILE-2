@@ -22,6 +22,7 @@ object PersonalTools {
         // v2.4 - a pending "yes/no" or a stop command must win over everything else.
         PhoneAgent.handle(context, text)?.let { return it }
         Wit.handleCommand(context, text)?.let { return it }   // v2.14 - "turn up the sarcasm"
+        BtAudio.handleCommand(context, text)?.let { return it }   // v2.15 - "check my earbuds" / "use my headset"
         WhatCanYouDo.handle(text)?.let { return it }
         PlanCommands.handle(context, text)?.let { return it }
         ReminderCommands.handle(context, text)?.let { return it }

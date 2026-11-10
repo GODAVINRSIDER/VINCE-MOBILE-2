@@ -465,7 +465,7 @@ object ElevenVoice {
         return AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(BtAudio.speechUsage())   // v2.16 - rides the headset call-audio route while that link is open
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )

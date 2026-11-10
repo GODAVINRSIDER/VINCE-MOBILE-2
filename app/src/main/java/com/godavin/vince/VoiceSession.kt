@@ -157,6 +157,8 @@ object VoiceSession {
         changePhase(Phase.LISTENING)
         job = scope.launch {
             try {
+                BtAudio.onSessionStart(app)   // v2.16 - open the headset link only for the length of this session
+                if (BtAudio.linkOn) delay(700)   // the hands-free link takes a moment to come up
                 beep()                 // the ONE beep that says "I'm listening"
                 delay(260)
                 muteEarcons()          // silence the recognizer's own beeps for the session
@@ -189,6 +191,7 @@ object VoiceSession {
         recognizer = null
         VoiceOutput.stop()
         unmuteAll()
+        try { appCtx?.let { BtAudio.onSessionEnd(it) } } catch (e: Exception) { }   // v2.16 - close the headset link: music and calls go back to normal
         if (wasActive) {
             changePhase(Phase.OFF)
             beep()                     // the ONE beep that says "conversation ended"

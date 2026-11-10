@@ -105,6 +105,12 @@ object VoiceOutput {
 
     private fun speakInternal(text: String, persona: Persona, queueMode: Int) {
         if (!ready || text.isBlank()) return
+        try {   // v2.16 - while the headset call-audio link is open, speech must ride it or it is silent
+            tts?.setAudioAttributes(
+                android.media.AudioAttributes.Builder().setUsage(BtAudio.speechUsage())
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build()
+            )
+        } catch (e: Exception) { }
 
         if (persona == Persona.VINCE) {
             if (vinceVoice != null) {

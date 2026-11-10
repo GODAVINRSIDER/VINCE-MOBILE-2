@@ -114,6 +114,14 @@ object BtLogic {
         "^\\W*(?:please\\s+)?(?:use|switch\\s+(?:back\\s+)?to|go\\s+back\\s+to|listen\\s+(?:through|on|to))\\s+(?:the\\s+|my\\s+)?(?:phone|phone's|built[- ]?in|default|normal)\\s*(?:mic|microphone|speakers?)?\\W*$|" +
             "^\\W*(?:please\\s+)?stop\\s+using\\s+(?:the\\s+|my\\s+)?" + DEV + "\\W*$", RegexOption.IGNORE_CASE
     )
+    val COMPARE = Regex(
+        "^\\W*(?:please\\s+)?(?:compare\\s+(?:my\\s+|the\\s+)?(?:mics?|microphones?)|(?:full|proper|complete)\\s+(?:(?:headset|earbuds?)\\s+)?mic\\s+(?:check|test)|" +
+            "compare\\s+(?:my\\s+|the\\s+)?" + DEV + "\\s*(?:mic|microphone)?(?:\\s+(?:with|to|and)\\s+(?:the\\s+|my\\s+)?phone\\s*(?:mic|microphone)?)?)\\W*$", RegexOption.IGNORE_CASE
+    )
+    val RESET = Regex(
+        "^\\W*(?:please\\s+)?(?:fix|reset|repair)\\s+(?:my\\s+|the\\s+)?(?:sound|audio)\\W*$|^\\W*(?:there\\s+is\\s+|there's\\s+)?no\\s+sound\\W*$|^\\W*i\\s+can(?:'?t|not)\\s+hear\\s+anything\\W*$",
+        RegexOption.IGNORE_CASE
+    )
     val TEST = Regex("^\\W*(?:please\\s+)?test\\s+(?:my\\s+|the\\s+)?" + DEV + "\\s*(?:mic|microphone)?\\W*$", RegexOption.IGNORE_CASE)
     val RESULT = Regex("^\\W*(?:please\\s+)?(?:(?:show\\s+|give\\s+me\\s+)?(?:the\\s+)?(?:headset|earbuds?|bluetooth)\\s+mic\\s+(?:test\\s+)?result|how\\s+did\\s+the\\s+(?:headset|earbuds?|bluetooth)\\s+(?:mic\\s+)?test\\s+go)\\W*$", RegexOption.IGNORE_CASE)
 
@@ -121,6 +129,8 @@ object BtLogic {
     fun kind(text: String): String? {
         val t = text.replace('\u2019', '\'').replace(Regex("\\s+"), " ").trim()
         return when {
+            RESET.matches(t) -> "reset"
+            COMPARE.matches(t) -> "compare"
             TEST.matches(t) -> "test"
             RESULT.matches(t) -> "result"
             PHONE.matches(t) -> "phone"

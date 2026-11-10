@@ -63,8 +63,39 @@ object BtAudio {
         } catch (e: Exception) { /* nothing more to do */ }
     }
 
+    // v2.16 - the headset's hands-free (call-audio) link is now open ONLY while a VINCE voice session is running. In 2.15 "use my headset" left it open
+    // permanently, and while it is open Android can send other apps' music (and VINCE's own voice) to a call channel that makes no sound.
+    @Volatile var sessionOn: Boolean = false
+        private set
+    @Volatile var linkOn: Boolean = false
+        private set
+
+    /** What VINCE's own speech should be tagged as: while the headset link is open it must ride the call-audio route or it is silent. */
+    fun speechUsage(): Int = if (linkOn) android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION else android.media.AudioAttributes.USAGE_MEDIA
+
+    /** VoiceSession started: if you chose a headset and it is connected, open the link now. */
+    fun onSessionStart(c: Context) {
+        sessionOn = true
+        try {
+            val pref = chosen(c)
+            if (pref.isNotBlank() && hasBtPermission(c) && scan(c).any { it.hasMic && it.name.equals(pref, ignoreCase = true) }) route(c, true)
+        } catch (e: Exception) { }
+    }
+
+    /** VoiceSession ended (or the app was left): close the link so music and calls are untouched. Safe to call twice. */
+    fun onSessionEnd(c: Context) {
+        sessionOn = false
+        try { if (linkOn || chosen(c).isNotBlank()) route(c, false) } catch (e: Exception) { }
+    }
+
     /** Turn the hands-free link to the headset on/off. True if Android accepted it. Never throws. */
     private fun route(c: Context, on: Boolean): Boolean {
+        val ok = routeRaw(c, on)
+        linkOn = on && ok
+        return ok
+    }
+
+    private fun routeRaw(c: Context, on: Boolean): Boolean {
         return try {
             val a = am(c)
             if (Build.VERSION.SDK_INT >= 31) {
@@ -95,6 +126,10 @@ object BtAudio {
             return "To listen through a Bluetooth headset I need the 'Nearby devices' permission. I opened VINCE's settings - allow it under Permissions, then say 'use my headset' again."
         }
         setChosen(c, h.name)
+        if (!sessionOn) {
+            return "Saved ${h.name} as your headset. VINCE will listen through it whenever voice mode is on, and let go of it when voice mode ends, " +
+                "so your music and calls are never affected. Say 'test my headset mic' any time to check it."
+        }
         return if (route(c, true)) {
             "Listening through ${h.name}. Say something, or say 'test my headset mic' and I'll tell you if I really hear you. " +
                 "Bluetooth drops to phone-call sound while the mic is on - that's normal. If it disconnects I switch back to the phone mic by myself."
@@ -109,8 +144,30 @@ object BtAudio {
         return "Back to the phone's own mic and speaker."
     }
 
-    /** Starts a 3-second listen on a background thread (never blocks the screen). Result: 'headset mic result'. */
-    fun startMicTest(c: Context): String {
+    /** v2.16 - "fix my sound": undoes anything the headset mode could have left behind, WITHOUT a phone restart - the headset call-audio link, speakerphone,
+     *  a stuck call mode, and media / notification / system sounds left muted. Also switches VINCE back to the phone mic. Never throws. */
+    fun resetAudio(c: Context): String {
+        val a = am(c)
+        val did = ArrayList<String>()
+        try { setChosen(c, "") } catch (e: Exception) { }
+        try { route(c, false); did.add("closed the headset call-audio link") } catch (e: Exception) { }
+        try { if (a.isSpeakerphoneOn) { a.isSpeakerphoneOn = false; did.add("turned the speakerphone off") } } catch (e: Exception) { }
+        try { if (a.mode == AudioManager.MODE_IN_COMMUNICATION) { a.mode = AudioManager.MODE_NORMAL; did.add("took the phone out of call-audio mode") } } catch (e: Exception) { }
+        val streams = intArrayOf(AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM)
+        val labels = arrayOf("media", "notification", "system")
+        for (i in streams.indices) {
+            try { if (a.isStreamMute(streams[i])) { a.adjustStreamVolume(streams[i], AudioManager.ADJUST_UNMUTE, 0); did.add("unmuted the ${labels[i]} sound") } } catch (e: Exception) { }
+        }
+        var tail = ""
+        try { if (a.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) tail = " Your media volume is at zero - raise it with the volume buttons." } catch (e: Exception) { }
+        return "Sound reset: " + did.joinToString(", ") + ". VINCE is back on the phone mic and speaker. Try your music or my voice again." + tail
+    }
+
+    private const val TEST_SECONDS = 5
+
+    /** Starts a 5-second listen on a background thread (never blocks the screen). Result: 'headset mic result'.
+     *  compare = true ('compare my mics'): headset, then the phone's own mic, judged the same way (v2.16). */
+    fun startMicTest(c: Context, compare: Boolean = false): String {
         val hs = scan(c)
         if (hs.isEmpty()) return "I don't see a Bluetooth headset connected, so there's no headset mic to test."
         val h = hs.firstOrNull { it.hasMic } ?: return BtLogic.lineFor(hs[0])
@@ -121,44 +178,71 @@ object BtAudio {
         }
         lastTest = "The test is still running - give it a few seconds."
         val app = c.applicationContext
-        thread(name = "bt-mic-test") { lastTest = runTest(app, h) }
-        return "Listening through ${h.name} for 3 seconds - keep talking. Then say 'headset mic result'."
+        thread(name = "bt-mic-test") { lastTest = runTest(app, h, compare) }
+        return if (compare)
+            "Listening through ${h.name} for $TEST_SECONDS seconds, then the phone mic for $TEST_SECONDS more - keep talking the whole time (about 12 seconds). Then say 'headset mic result'."
+        else
+            "Listening through ${h.name} for $TEST_SECONDS seconds - say 'testing one two three' and keep talking. Then say 'headset mic result'."
     }
 
     fun lastTestResult(): String = lastTest
 
-    private fun runTest(c: Context, h: BtLogic.Headset): String {
-        val wasChosen = chosen(c).equals(h.name, ignoreCase = true)
+    /** Records [seconds] of 16-bit mono audio at 16 kHz. Null if the mic could not be opened. Throws SecurityException if permission is missing. */
+    private fun record(source: Int, device: AudioDeviceInfo?, seconds: Int): ShortArray? {
+        val rate = 16000
         var rec: AudioRecord? = null
+        try {
+            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val r = AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 4096) * 2)
+            rec = r
+            if (r.state != AudioRecord.STATE_INITIALIZED) return null
+            if (device != null) r.setPreferredDevice(device)
+            r.startRecording()
+            val out = ShortArray(rate * seconds)
+            var got = 0
+            val end = System.currentTimeMillis() + seconds * 1000L + 1500
+            while (got < out.size && System.currentTimeMillis() < end) {
+                val n = r.read(out, got, minOf(1024, out.size - got))
+                if (n > 0) got += n else if (n < 0) break
+            }
+            r.stop()
+            return out.copyOf(got)
+        } finally {
+            try { rec?.release() } catch (e: Exception) { }
+        }
+    }
+
+    private fun runTest(c: Context, h: BtLogic.Headset, compare: Boolean): String {
+        val wasChosen = chosen(c).equals(h.name, ignoreCase = true)
         try {
             route(c, true)
             Thread.sleep(800)   // the hands-free link takes a moment to come up
-            val rate = 16000
-            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val r = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 4096) * 2)
-            rec = r
-            if (r.state != AudioRecord.STATE_INITIALIZED) return "I couldn't open the mic for the test. Another app may be using it."
             val inDev = am(c).getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
                 (it.type == BtLogic.TYPE_SCO || it.type == BtLogic.TYPE_BLE_HEADSET) && (it.productName?.toString() ?: "").trim().equals(h.name, ignoreCase = true)
             }
-            if (inDev != null) r.setPreferredDevice(inDev)
-            r.startRecording()
-            val buf = ShortArray(1024)
-            var peak = 0
-            val end = System.currentTimeMillis() + 3000
-            while (System.currentTimeMillis() < end) {
-                val n = r.read(buf, 0, buf.size)
-                for (i in 0 until maxOf(n, 0)) peak = maxOf(peak, Math.abs(buf[i].toInt()))
+            val samples = record(MediaRecorder.AudioSource.VOICE_COMMUNICATION, inDev, TEST_SECONDS)
+                ?: return "I couldn't open the mic for the test. Another app may be using it."
+            val res = MicHealth.analyze(samples, 16000)
+            if (res.verdict == "too_short") return "I couldn't record enough audio from the ${h.name} mic to judge it. Try again and keep talking."
+            var control: MicHealth.Result? = null
+            if (compare) {
+                route(c, false)
+                Thread.sleep(700)
+                val phoneDev = am(c).getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+                val cs = record(MediaRecorder.AudioSource.MIC, phoneDev, TEST_SECONDS)
+                if (cs != null) control = MicHealth.analyze(cs, 16000).takeIf { it.verdict != "too_short" }
             }
-            r.stop()
-            return BtLogic.levelMessage(h.name, peak)
+            var text = MicHealth.explain(res, h.name, control, "phone mic")
+            if (res.verdict != "ok" && control == null) {
+                text += " Say 'compare my mics' and I'll test the phone mic the same way, so we know whether it's the earbuds or the phone."
+            }
+            return text
         } catch (e: SecurityException) {
             return "Android blocked the mic test (permission). Allow Microphone and Nearby devices for VINCE and try again."
         } catch (e: Exception) {
             return "The headset mic test failed (${e.javaClass.simpleName}). Wait a few seconds and try again."
         } finally {
-            try { rec?.release() } catch (e: Exception) { }
-            if (!wasChosen) route(c, false)   // only keep the link if you had chosen the headset
+            route(c, wasChosen && sessionOn)   // keep the link only if a voice session is running and you had chosen the headset
         }
     }
 
@@ -170,7 +254,7 @@ object BtAudio {
         val app = context.applicationContext
         try {
             lastSeen = scan(app).associate { it.name to it.hasMic }
-            if (chosen(app).isNotBlank() && scan(app).any { it.hasMic && it.name.equals(chosen(app), ignoreCase = true) } && hasBtPermission(app)) route(app, true)
+            if (chosen(app).isNotBlank()) route(app, false)   // v2.16 - never start with the link open; it opens only while a voice session runs
             am(app).registerAudioDeviceCallback(object : AudioDeviceCallback() {
                 override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) { schedule(app) }
                 override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) { schedule(app) }
@@ -194,7 +278,7 @@ object BtAudio {
             lastSeen = cur
             if (prev == null) return
             val pref = chosen(app)
-            if (pref.isNotBlank() && hasBtPermission(app)) {
+            if (sessionOn && pref.isNotBlank() && hasBtPermission(app)) {
                 route(app, cur.entries.any { it.key.equals(pref, ignoreCase = true) && it.value })   // follow the headset, or fall back to the phone mic
             }
             val msgs = BtLogic.diff(prev, cur, pref)
@@ -208,12 +292,14 @@ object BtAudio {
     }
 
     // ---------------------------------------------------------------------------------------------------
-    /** "check my earbuds", "use my headset", "use the phone mic", "test my headset mic", "headset mic result". Null if not about this. */
+    /** "check my earbuds", "use my headset", "use the phone mic", "test my headset mic", "compare my mics", "headset mic result", "fix my sound". Null if not about this. */
     fun handleCommand(context: Context, rawText: String): String? {
         return when (BtLogic.kind(rawText)) {
             "check" -> describe(context)
             "use" -> useHeadset(context)
             "phone" -> usePhone(context)
+            "reset" -> resetAudio(context)
+            "compare" -> startMicTest(context, true)
             "test" -> startMicTest(context)
             "result" -> lastTestResult()
             else -> null

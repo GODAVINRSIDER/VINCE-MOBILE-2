@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -234,6 +235,11 @@ fun SettingsScreen(onBack: () -> Unit) {
     var cfTokenText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.CLOUDFLARE)) }
     var cfAccountText by remember { mutableStateOf(ApiKeyStore.getKey(context, Provider.CLOUDFLARE_ACCOUNT)) }
     var cfModel by remember { mutableStateOf(BrainPrefs.cloudflareModel(context)) }
+    var localUrl by remember { mutableStateOf(BrainPrefs.localUrl(context)) }
+    var localModel by remember { mutableStateOf(BrainPrefs.localModel(context)) }
+    var localKey by remember { mutableStateOf(BrainPrefs.localKey(context)) }
+    var localStatus by remember { mutableStateOf("") }
+    val settingsScope = rememberCoroutineScope()
     var saved by remember { mutableStateOf(false) }
 
     // Fix - this screen grew to 4 stacked sections (API keys, System
@@ -331,6 +337,43 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(16.dp))
 
+            Text("Local brain address (optional last-resort backup - Ollama, llama.cpp, LM Studio or your VINCE hub)", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Text("Example: 192.168.1.50:11434 - used only when every cloud brain has failed", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            OutlinedTextField(
+                value = localUrl,
+                onValueChange = { localUrl = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Local model name (exactly as the server lists it, e.g. qwen2.5:3b)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            OutlinedTextField(
+                value = localModel,
+                onValueChange = { localModel = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text("Local key (leave blank unless your server needs one)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            OutlinedTextField(
+                value = localKey,
+                onValueChange = { localKey = it; saved = false },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            ButtonGrid(
+                BtnSpec("Test local brain") {
+                    localStatus = "Testing..."
+                    settingsScope.launch {
+                        val r = LocalBrain.test(localUrl, localModel, localKey)
+                        localStatus = if (r.isSuccess) "Local brain works: \"${r.getOrNull()?.take(60)}\"" else (r.exceptionOrNull()?.message ?: "Failed")
+                    }
+                },
+                perRow = 1
+            )
+            if (localStatus.isNotBlank()) {
+                Text(localStatus, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text(
                 "Finnhub API key (optional - crypto/forex price backup)",
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
@@ -368,6 +411,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ApiKeyStore.saveKey(context, Provider.CLOUDFLARE_ACCOUNT, cfAccountText)
                     BrainPrefs.setMistralModel(context, mistralModel)
                     BrainPrefs.setCloudflareModel(context, cfModel)
+                    BrainPrefs.setLocal(context, localUrl, localModel, localKey)
                     saved = true
                 },
                 BtnSpec("Back") { onBack() },

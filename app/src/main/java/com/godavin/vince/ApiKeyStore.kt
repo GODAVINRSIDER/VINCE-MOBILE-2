@@ -28,6 +28,13 @@ object BrainPrefs {
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     fun mistralModel(c: Context): String = prefs(c).getString("mistral_model", "")?.trim().orEmpty()
     fun cloudflareModel(c: Context): String = prefs(c).getString("cloudflare_model", "")?.trim().orEmpty()
+    // v2.17 - local brain (Ollama / llama.cpp / LM Studio / hub). Not secret, so plain prefs.
+    fun localUrl(c: Context): String = prefs(c).getString("local_url", "")?.trim().orEmpty()
+    fun localModel(c: Context): String = prefs(c).getString("local_model", "")?.trim().orEmpty()
+    fun localKey(c: Context): String = prefs(c).getString("local_key", "")?.trim().orEmpty()
+    fun setLocal(c: Context, url: String, model: String, key: String) {
+        prefs(c).edit().putString("local_url", url.trim()).putString("local_model", model.trim()).putString("local_key", key.trim()).apply()
+    }
     fun setMistralModel(c: Context, v: String) { prefs(c).edit().putString("mistral_model", v.trim()).apply() }
     fun setCloudflareModel(c: Context, v: String) { prefs(c).edit().putString("cloudflare_model", v.trim()).apply() }
 }
@@ -72,5 +79,6 @@ object ApiKeyStore {
      * having only a Finnhub key shouldn't claim "chat is ready". */
     fun hasAnyKey(context: Context): Boolean =
         listOf(Provider.GEMINI, Provider.GROQ, Provider.OPENROUTER, Provider.MISTRAL).any { hasKey(context, it) } ||
-            (hasKey(context, Provider.CLOUDFLARE) && hasKey(context, Provider.CLOUDFLARE_ACCOUNT))
+            (hasKey(context, Provider.CLOUDFLARE) && hasKey(context, Provider.CLOUDFLARE_ACCOUNT)) ||
+            LocalBrain.configured(context)
 }

@@ -122,12 +122,19 @@ object WebSearchTool {
         "what do you think", "should i", "advise", "help me", "walk me"
     )
 
+    private val ANNOUNCEMENTS = listOf(
+        "i'm sending", "im sending", "i am sending", "i will send", "i'll send", "ill send",
+        "sending you", "here is the", "here's the", "heres the", "here are the", "attached is", "i'm uploading", "i am uploading"
+    )
+
     /** Wide default: every real question or substantive request searches.
      * Only tiny small talk skips it. */
     fun shouldSearch(text: String): Boolean {
         val cleaned = text.trim().lowercase().replace(Regex("[^a-z0-9' ]"), " ").replace(Regex("\\s+"), " ").trim()
         if (cleaned.isBlank()) return false
         if (cleaned in SMALL_TALK) return false
+        // v2.17 - "I'm sending you the list..." is an announcement, not a question: no web search
+        if (ANNOUNCEMENTS.any { cleaned.startsWith(it) } && !text.contains("?") && !FORCE_REGEX.containsMatchIn(text)) return false
         if (mustSearch(text)) return true
         if (looksLikeQuestion(text)) return true
         if (IMPERATIVE_STARTERS.any { cleaned.startsWith(it) }) return true

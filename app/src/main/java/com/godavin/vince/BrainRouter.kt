@@ -550,24 +550,40 @@ object BrainRouter {
             return fixed
         }
         val backends = buildBackends(context, prepared)
-        if (backends.isEmpty()) {
+        if (backends.isEmpty() && !LocalBrain.configured(context)) {
             return "No API keys saved yet - add at least one (Gemini, Groq, Mistral, Cloudflare or OpenRouter) in Settings."
         }
         val timeout = if (prepared.maxTokens > CHAT_MAX_TOKENS) RESEARCH_TIMEOUT_MS else OVERALL_TIMEOUT_MS
         val onSlow: (() -> Unit)? = if (onStatus == null) null else ({ onStatus(Narration.slow(persona)) })
         val liveSink: DeltaSink? = if (prepared.ungrounded) null else onDelta   // held back until checked
-        val (text, failures) = runRace(backends, liveSink, timeout, onSlow)
-        if (failures.isNotEmpty()) {   // v2.11 - provider trouble goes in the log even when another provider saved the day
-            VinceLog.w(context, "brain", "provider failures (answered anyway: ${text != null}): " + failures.joinToString(" | ").take(500))
+        val (raceText, raceFailures) = if (backends.isEmpty()) Pair<String?, List<String>>(null, emptyList()) else runRace(backends, liveSink, timeout, onSlow)
+        var text = raceText
+        val failures = raceFailures.toMutableList()
+        var localUsed = false
+        // v2.17 - every cloud brain failed or timed out: last resort is the local brain (Ollama etc. at the saved address)
+        if (text == null && LocalBrain.configured(context)) {
+            onStatus?.invoke("Cloud brains are down - trying my local brain...")
+            val r = LocalBrain.chat(context, prepared.fullMessage, prepared.maxTokens)
+            val reply = r.getOrNull()
+            if (!reply.isNullOrBlank()) {
+                text = reply
+                localUsed = true
+            } else {
+                failures.add(r.exceptionOrNull()?.message ?: "Local: failed")
+            }
         }
-        if (text != null) {
-            var finalText = AnswerGuard.finalize(text, prepared.stripClaims, prepared.estimate)
+        if (failures.isNotEmpty()) {   // v2.11 - provider trouble goes in the log even when another provider saved the day
+            VinceLog.w(context, "brain", "provider failures (answered anyway: ${text != null}${if (localUsed) ", by LOCAL brain" else ""}): " + failures.joinToString(" | ").take(500))
+        }
+        val answer = text
+        if (answer != null) {
+            var finalText = AnswerGuard.finalize(answer, prepared.stripClaims, prepared.estimate)
             if (!probe) {
                 // v2.14 - a model sentence claiming "I've set a reminder" is made true (or replaced by an honest line); an offer is remembered for "yes"
                 finalText = ReminderOffers.reconcileClaims(finalText) { cmd -> ReminderCommands.handle(context, cmd) }
                 ReminderOffers.note(finalText)
             }
-            if (liveSink == null && onDelta != null) onDelta(finalText)
+            if ((liveSink == null || localUsed) && onDelta != null) onDelta(finalText)
             return finalText
         }
         return "All providers failed:\n" + failures.joinToString("\n")
@@ -677,6 +693,7 @@ object BrainRouter {
         val failures = ConcurrentLinkedQueue<String>()
         val remaining = AtomicInteger(backends.size)
         val triggers = backends.map { CompletableDeferred<Unit>() }
+        val started = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()   // v2.17 - for the timeout report
 
         triggers[0].complete(Unit)
         for (i in 1 until backends.size) {
@@ -691,6 +708,7 @@ object BrainRouter {
             launch {
                 triggers[i].await()
                 if (result.isCompleted) return@launch
+                started.add(b.name)
                 val t0 = System.currentTimeMillis()
                 var gotFirst = false
 
@@ -736,6 +754,15 @@ object BrainRouter {
         val text: String? = if (result.isCompleted) finished else {
             val shown = synchronized(partial) { partial.toString() }
             if (shown.isNotBlank()) shown else {
+                // v2.17 - say WHO was still silent, so "timed out" tells you whether it is one provider or the whole network
+                val failedNames = failures.map { it.substringBefore(":") }.toSet()
+                for (b in backends) {
+                    if (b.name in failedNames) continue
+                    failures.add(
+                        if (b.name in started) "${b.name}: no answer within ${timeoutMs / 1000}s (slow network or provider)"
+                        else "${b.name}: never started (earlier providers were still busy)"
+                    )
+                }
                 failures.add("Timed out waiting for a reply.")
                 null
             }
